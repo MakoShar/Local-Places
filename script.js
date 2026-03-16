@@ -1,37 +1,45 @@
 /* ================================================================
    LocalPlaces — script.js
-   Firebase auth, Firestore, recommendation engine, UI logic
+   Local auth, local storage recommendation engine, UI logic
    ================================================================ */
 
 /* ------------------------------------------------------------------
-   0.  FIREBASE CONFIG
-   Replace these placeholder values with your Firebase project config.
-   Get them from: Firebase Console → Project Settings → Your Apps
+   0.  LOCAL-ONLY MODE
+   Firebase has been removed. Data/auth are stored in browser localStorage.
    ------------------------------------------------------------------ */
-const FIREBASE_CONFIG = {
-  apiKey:            "AIzaSyDGxwRl2_u-08BPiKMRIQZdedCKD5fE4CQ",
-  authDomain:        "local-places-ba38e.firebaseapp.com",
-  projectId:         "local-places-ba38e",
-  storageBucket:     "local-places-ba38e.firebasestorage.app",
-  messagingSenderId: "333390724166",
-  appId:             "1:333390724166:web:b990e81c59b1590946de47"
-};
+
 /* ------------------------------------------------------------------
    1.  INIT
    ------------------------------------------------------------------ */
-firebase.initializeApp(FIREBASE_CONFIG);
-const db = firebase.firestore();
-const storage = firebase.storage();
+const LOCAL_FIELD_VALUE = {
+  serverTimestamp: () => new Date().toISOString(),
+  increment: (n) => n,
+};
+
+const db = {
+  collection() {
+    throw new Error('Cloud database removed. App runs in local mode only.');
+  },
+  batch() {
+    throw new Error('Cloud database removed. App runs in local mode only.');
+  }
+};
+
+const storage = {
+  ref() {
+    throw new Error('Cloud storage removed. App runs in local mode only.');
+  }
+};
 
 /* ------------------------------------------------------------------
    2.  APP STATE
    ------------------------------------------------------------------ */
-let currentUser = null;   // Firebase User
-let userData = null;   // Firestore user doc
+let currentUser = null;   // local auth user
+let userData = null;   // local user profile
 let userLocation = null;   // { lat, lng }
 let isGuest = false;  // anonymous session
-let backendMode = 'local'; // 'firebase' | 'local'
-let allPlaces = [];     // Loaded from Firestore
+let backendMode = 'local'; // always local
+let allPlaces = [];     // Loaded from local seed/mock sources
 let activeFilter = 'all';
 let obMap = null;   // Onboarding Google Map
 let obMarker = null;
@@ -41,8 +49,10 @@ const LOCAL_USER_KEY_PREFIX = 'localplaces_user_';
 const LOGIN_INFO_KEY = 'localplaces_login_info';
 const AUTH_USERS_KEY = 'localplaces_auth_users';
 const AUTH_SESSION_KEY = 'localplaces_auth_session';
+const AUTH_BOOTSTRAP_FLAG_KEY = 'localplaces_auth_bootstrapped_v1';
 const localAuthListeners = [];
 let localAuthCurrentUser = null;
+let authBootstrapPromise = null;
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
@@ -64,6 +74,61 @@ function readAuthUsers() {
 
 function writeAuthUsers(users) {
   localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
+}
+
+async function bootstrapAuthUsersFromTemplate(force = false) {
+  if (authBootstrapPromise) return authBootstrapPromise;
+
+  authBootstrapPromise = (async () => {
+    try {
+      if (!force) {
+        const alreadyBootstrapped = localStorage.getItem(AUTH_BOOTSTRAP_FLAG_KEY) === '1';
+        if (alreadyBootstrapped) return;
+      }
+
+      const existing = readAuthUsers();
+      if (!force && existing.length) {
+        localStorage.setItem(AUTH_BOOTSTRAP_FLAG_KEY, '1');
+        return;
+      }
+
+      const response = await fetch('login-info.json', { cache: 'no-store' });
+      if (!response.ok) return;
+
+      const payload = await response.json();
+      const templateUsers = Array.isArray(payload?.users) ? payload.users : [];
+      if (!templateUsers.length) {
+        localStorage.setItem(AUTH_BOOTSTRAP_FLAG_KEY, '1');
+        return;
+      }
+
+      const seeded = [...existing];
+      templateUsers.forEach((u, idx) => {
+        const email = normalizeEmail(u?.emailId || u?.email);
+        const password = String(u?.password || '');
+        if (!email || !password) return;
+        if (seeded.some(existingUser => existingUser.email === email)) return;
+
+        seeded.push({
+          uid: String(u?.userId || u?.uid || `seed_${idx}_${Math.random().toString(36).slice(2, 8)}`),
+          email,
+          displayName: String(u?.name || email.split('@')[0] || 'Explorer'),
+          password,
+          passwordHash: hashPassword(password),
+          accountCreatedDate: String(u?.accountCreatedDate || new Date().toISOString()),
+        });
+      });
+
+      if (seeded.length !== existing.length) writeAuthUsers(seeded);
+      localStorage.setItem(AUTH_BOOTSTRAP_FLAG_KEY, '1');
+    } catch {
+      // Ignore bootstrap failures; app can still run with sign-up flow.
+    } finally {
+      authBootstrapPromise = null;
+    }
+  })();
+
+  return authBootstrapPromise;
 }
 
 function saveAuthSession(user) {
@@ -133,6 +198,8 @@ const auth = {
   },
   async signInWithEmailAndPassword(email, password) {
     const normalized = normalizeEmail(email);
+    await bootstrapAuthUsersFromTemplate();
+
     const users = readAuthUsers();
     const found = users.find(u => u.email === normalized);
     if (!found) {
@@ -140,11 +207,26 @@ const auth = {
       err.code = 'auth/user-not-found';
       throw err;
     }
-    if (found.passwordHash !== hashPassword(password)) {
+
+    const hashed = hashPassword(password);
+    const matchesHash = found.passwordHash === hashed;
+    const matchesLegacyPlain = found.password && found.password === String(password || '');
+
+    if (!matchesHash && !matchesLegacyPlain) {
       const err = new Error('Wrong password');
       err.code = 'auth/wrong-password';
       throw err;
     }
+
+    if (!matchesHash && matchesLegacyPlain) {
+      // Upgrade legacy plain-password records to hashed verification.
+      const idx = users.findIndex(u => u.uid === found.uid);
+      if (idx >= 0) {
+        users[idx].passwordHash = hashed;
+        writeAuthUsers(users);
+      }
+    }
+
     localAuthCurrentUser = makeAuthUser(found, false);
     saveAuthSession(localAuthCurrentUser);
     emitLocalAuthState();
@@ -214,6 +296,7 @@ const auth = {
 };
 
 hydrateLocalAuthSession();
+bootstrapAuthUsersFromTemplate();
 
 /* ------------------------------------------------------------------
    3.  CONSTANTS
@@ -662,7 +745,7 @@ function enableLocalMode(err) {
   if (backendMode === 'local') return;
   backendMode = 'local';
   console.warn('Switching to local mode:', err?.message || err);
-  showToast('Running in local mode (no Firestore billing required).', 'info', 5500);
+  showToast('Running in local-only mode.', 'info', 5500);
 }
 
 auth.getRedirectResult().catch(err => {
@@ -754,7 +837,7 @@ auth.onAuthStateChanged(async user => {
       return;
     }
 
-    showToast(friendlyFirebaseError(e, 'Connection error. Check Firebase setup.'), 'error', 5000);
+      showToast(friendlyDataError(e, 'Connection error. Please reload the app.'), 'error', 5000);
     showView('auth-view');
   }
 });
@@ -784,7 +867,7 @@ async function handleLogin(e) {
     const code = err?.code || '';
 
     if (code === 'auth/user-not-found') {
-      showToast('No account found. Please sign up first.', 'info', 4000);
+      showToast('No account found on this site. Sign up first, or use a seeded demo account from login-info.json.', 'info', 5000);
       switchAuthTab('signup');
       document.getElementById('signup-email').value = email;
       if (!document.getElementById('signup-name').value.trim()) {
@@ -830,7 +913,7 @@ async function handleGuestAuth() {
   try {
     await auth.signInAnonymously();
   } catch (err) {
-    showToast('Could not start guest session. Enable Anonymous Auth in Firebase.', 'error');
+    showToast('Could not start guest session. Please try again.', 'error');
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-user-secret"></i> Use as Guest';
   }
@@ -852,22 +935,22 @@ function friendlyAuthError(code) {
     'auth/weak-password': 'Password must be at least 6 characters.',
     'auth/too-many-requests': 'Too many attempts. Wait a moment.',
     'auth/invalid-email': 'Enter a valid email address.',
-    'auth/api-key-not-valid': 'Firebase API key is invalid. Check your Firebase config.',
+    'auth/api-key-not-valid': 'Auth configuration is invalid for this deployment.',
     'auth/network-request-failed': 'Network blocked or unavailable. Check internet/adblock.',
     'auth/popup-closed-by-user': 'Sign-in popup closed.',
     'auth/popup-blocked': 'Popup was blocked. Allow popups and try again.',
-    'auth/operation-not-allowed': 'Enable this sign-in method in Firebase Authentication.',
-    'auth/unauthorized-domain': 'This domain is not allowed in Firebase Authorized Domains.',
+    'auth/operation-not-allowed': 'This sign-in method is not allowed for this deployment.',
+    'auth/unauthorized-domain': 'This domain is not authorized for this deployment.',
   };
   return map[code] || 'Authentication failed. Check your connection.';
 }
 
-function friendlyFirebaseError(err, fallback = 'Firebase request failed.') {
+function friendlyDataError(err, fallback = 'Request failed.') {
   const msg = (err?.message || '').toLowerCase();
   const code = err?.code || '';
 
   if (code === 'permission-denied' || msg.includes('cloud firestore api has not been used') || msg.includes('requires billing')) {
-    return 'Firestore needs billing on this project. App switched to local mode for now.';
+    return 'Cloud sync is unavailable. App is running in local mode.';
   }
   if (msg.includes('err_blocked_by_client')) {
     return 'Requests are blocked by browser extension/adblock. Disable blocker for this site and reload.';
@@ -1080,7 +1163,7 @@ async function saveOnboarding() {
       points: 0,
       totalClicks: 0,
       onboardingComplete: true,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdAt: LOCAL_FIELD_VALUE.serverTimestamp(),
     });
     const snap = await db.collection('users').doc(currentUser.uid).get();
     userData = snap.data();
@@ -1115,7 +1198,7 @@ async function saveOnboarding() {
       return;
     }
 
-    showToast(friendlyFirebaseError(e, 'Could not save profile. Check Firebase.'), 'error', 5000);
+    showToast(friendlyDataError(e, 'Could not save profile locally.'), 'error', 5000);
     btn.disabled = false; btn.innerHTML = 'Let\'s Go! <i class="fas fa-rocket"></i>';
   }
 }
@@ -1202,7 +1285,7 @@ async function loadFeed() {
     }
 
     loading.classList.add('hidden');
-    showToast(friendlyFirebaseError(e, 'Could not load feed. Check Firebase.'), 'error', 5000);
+    showToast(friendlyDataError(e, 'Could not load feed right now.'), 'error', 5000);
   }
 }
 
@@ -1287,8 +1370,8 @@ async function openPlaceModal(place, dist) {
   } else {
     try {
       const updates = {};
-      (place.tags || []).forEach(t => { updates[`tagScores.${t}`] = firebase.firestore.FieldValue.increment(1); });
-      updates['totalClicks'] = firebase.firestore.FieldValue.increment(1);
+      (place.tags || []).forEach(t => { updates[`tagScores.${t}`] = LOCAL_FIELD_VALUE.increment(1); });
+      updates['totalClicks'] = LOCAL_FIELD_VALUE.increment(1);
       await db.collection('users').doc(currentUser.uid).update(updates);
       if (userData) {
         userData.totalClicks = (userData.totalClicks || 0) + 1;
@@ -1367,7 +1450,7 @@ function openUploadModal() {
   }
 
   if (backendMode === 'local') {
-    showToast('Video upload needs Firestore/Storage billing. Local mode keeps feed and auth working.', 'info', 5000);
+    showToast('Video upload is unavailable in local-only mode.', 'info', 5000);
     return;
   }
 
@@ -1425,7 +1508,7 @@ async function handleVideoUpload(e) {
   progressWrap.classList.remove('hidden');
 
   try {
-    // Upload to Firebase Storage
+    // Upload to remote storage backend
     const path = `videos/${currentUser.uid}/${Date.now()}_${file.name}`;
     const ref = storage.ref(path);
     const task = ref.put(file);
@@ -1439,7 +1522,7 @@ async function handleVideoUpload(e) {
       err => { throw err; },
       async () => {
         const url = await ref.getDownloadURL();
-        // Save metadata to Firestore
+        // Save metadata to backend
         await db.collection('videos').add({
           userId: currentUser.uid,
           uploaderName: (currentUser.displayName || 'explorer').toLowerCase().replace(/\s+/, ''),
@@ -1449,11 +1532,11 @@ async function handleVideoUpload(e) {
           videoUrl: url,
           caption,
           pointsAwarded: 10,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          createdAt: LOCAL_FIELD_VALUE.serverTimestamp(),
         });
         // Award points
         await db.collection('users').doc(currentUser.uid).update({
-          points: firebase.firestore.FieldValue.increment(10)
+          points: LOCAL_FIELD_VALUE.increment(10)
         });
         if (userData) userData.points = (userData.points || 0) + 10;
         updateHeaderPoints();
@@ -1465,7 +1548,7 @@ async function handleVideoUpload(e) {
     );
   } catch (err) {
     console.error(err);
-    showToast('Upload failed. Check Firebase Storage CORS settings.', 'error');
+    showToast('Upload failed.', 'error');
     submitBtn.disabled = false;
     progressWrap.classList.add('hidden');
   }
