@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LocalPlaces — Discover What's Near You</title>
+  <meta name="description" content="AI-powered local discovery. Personalized places and experiences based on your interests and location." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ===================== LOADING SCREEN ===================== -->
+<div id="loading-screen">
+  <div class="loader-content">
+    <div class="loader-icon-ring">
+      <i class="fas fa-map-marker-alt loader-icon"></i>
+    </div>
+    <h1 class="loader-title">LocalPlaces</h1>
+    <p class="loader-sub">Discovering your world…</p>
+    <div class="loader-track"><div class="loader-fill"></div></div>
+  </div>
+</div>
+
+<!-- ===================== AUTH VIEW ===================== -->
+<div id="auth-view" class="view hidden">
+  <div class="auth-blobs">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+    <div class="blob b3"></div>
+  </div>
+  <div class="auth-container">
+    <div class="auth-hero">
+      <div class="brand-icon"><i class="fas fa-map-marker-alt"></i></div>
+      <h1 class="brand-name">LocalPlaces</h1>
+      <p class="brand-sub">Your AI guide to the world around you</p>
+    </div>
+    <div class="auth-card">
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">Sign In</button>
+        <button class="auth-tab" id="tab-signup" onclick="switchAuthTab('signup')">Sign Up</button>
+        <div class="tab-slider" id="tab-slider"></div>
+      </div>
+
+      <!-- Login -->
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="field-group">
+          <div class="field-wrap">
+            <i class="fas fa-envelope field-icon"></i>
+            <input type="email" id="login-email" placeholder="Email address" required autocomplete="email" />
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="field-wrap">
+            <i class="fas fa-lock field-icon"></i>
+            <input type="password" id="login-password" placeholder="Password" required autocomplete="current-password" />
+          </div>
+        </div>
+        <button type="submit" class="btn-primary full-w" id="login-btn">
+          <span>Sign In</span><i class="fas fa-arrow-right"></i>
+        </button>
+      </form>
+
+      <!-- Signup -->
+      <form id="signup-form" class="hidden" onsubmit="handleSignup(event)">
+        <div class="field-group">
+          <div class="field-wrap">
+            <i class="fas fa-user field-icon"></i>
+            <input type="text" id="signup-name" placeholder="Full Name" required autocomplete="name" />
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="field-wrap">
+            <i class="fas fa-envelope field-icon"></i>
+            <input type="email" id="signup-email" placeholder="Email address" required autocomplete="email" />
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="field-wrap">
+            <i class="fas fa-lock field-icon"></i>
+            <input type="password" id="signup-password" placeholder="Password (min 6 chars)" required minlength="6" autocomplete="new-password" />
+          </div>
+        </div>
+        <button type="submit" class="btn-primary full-w" id="signup-btn">
+          <span>Create Account</span><i class="fas fa-arrow-right"></i>
+        </button>
+      </form>
+
+      <div class="or-divider"><span>or</span></div>
+
+      <button class="btn-google" onclick="handleGoogleAuth()">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6A7.8 7.8 0 0 0 16.63 9.1c0-.57-.05-1.1-.12-1.1z"/>
+          <path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/>
+          <path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/>
+          <path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.31z"/>
+        </svg>
+        Continue with Google
+      </button>
+
+      <button class="btn-guest" onclick="handleGuestAuth()">
+        <i class="fas fa-user-secret"></i> Use as Guest
+      </button>
+    </div>
+    <p class="auth-legal">By continuing you agree to our <a href="#">Terms</a> &amp; <a href="#">Privacy</a></p>
+  </div>
+</div>
+
+<!-- ===================== ONBOARDING VIEW ===================== -->
+<div id="onboarding-view" class="view hidden">
+  <div class="ob-wrap">
+
+    <!-- Step 1: Interests -->
+    <div id="ob-step1" class="ob-step">
+      <div class="ob-top">
+        <div class="ob-progress"><div class="ob-prog-fill" style="width:50%"></div></div>
+        <span class="ob-step-label">Step 1 of 2</span>
+      </div>
+      <div class="ob-body">
+        <h2>What are you into?</h2>
+        <p class="ob-desc">Pick at least 3 interests — we'll personalise your feed</p>
+        <div class="interests-grid" id="interests-grid">
+          <!-- Filled by JS -->
+        </div>
+      </div>
+      <div class="ob-actions">
+        <span id="selected-count" class="sel-count">0 selected</span>
+        <button class="btn-primary" onclick="goToStep2()" id="next-step-btn" disabled>
+          Next <i class="fas fa-arrow-right"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 2: Location -->
+    <div id="ob-step2" class="ob-step hidden">
+      <div class="ob-top">
+        <div class="ob-progress"><div class="ob-prog-fill" style="width:100%"></div></div>
+        <span class="ob-step-label">Step 2 of 2</span>
+      </div>
+      <div class="ob-body">
+        <h2>Where are you?</h2>
+        <p class="ob-desc">We'll surface the closest places first. Your location stays private.</p>
+        <button class="btn-detect" onclick="detectLocation()" id="detect-btn">
+          <i class="fas fa-crosshairs"></i> Use My Location
+        </button>
+        <div class="or-divider small"><span>or search</span></div>
+        <div class="field-wrap">
+          <i class="fas fa-search field-icon"></i>
+          <input type="text" id="location-search" placeholder="Search your city or address…" autocomplete="off" />
+        </div>
+        <div id="map-container">
+          <div id="onboarding-map"></div>
+        </div>
+        <div id="location-set-badge" class="loc-badge hidden">
+          <i class="fas fa-check-circle"></i>
+          <span id="location-display">Location set</span>
+        </div>
+      </div>
+      <div class="ob-actions">
+        <button class="btn-ghost" onclick="backToStep1()"><i class="fas fa-arrow-left"></i> Back</button>
+        <button class="btn-primary" onclick="saveOnboarding()" id="save-ob-btn" disabled>
+          Let's Go! <i class="fas fa-rocket"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MAIN APP ===================== -->
+<div id="app-view" class="hidden">
+
+  <!-- Top Header -->
+  <header class="top-header">
+    <div class="hdr-brand">
+      <i class="fas fa-map-marker-alt"></i><span>LocalPlaces</span>
+    </div>
+    <div class="hdr-right">
+      <div class="pts-pill" id="pts-pill">
+        <i class="fas fa-star"></i><span id="hdr-points">0</span> pts
+      </div>
+    </div>
+  </header>
+
+  <!-- -------- FEED PAGE -------- -->
+  <section id="feed-page" class="app-page active-page">
+    <div class="page-top">
+      <div>
+        <h2 class="page-h2">For You <span class="ai-tag">AI</span></h2>
+        <p class="page-sub" id="feed-sub">Sorted by your interests &amp; location</p>
+      </div>
+    </div>
+    <div class="filter-row" id="filter-row">
+      <button class="fchip active-chip" data-tag="all" onclick="filterFeed('all',this)">✨ All</button>
+      <button class="fchip" data-tag="walking" onclick="filterFeed('walking',this)">🚶 Walking</button>
+      <button class="fchip" data-tag="food" onclick="filterFeed('food',this)">🍔 Food</button>
+      <button class="fchip" data-tag="history" onclick="filterFeed('history',this)">🏛️ History</button>
+      <button class="fchip" data-tag="nature" onclick="filterFeed('nature',this)">🌿 Nature</button>
+      <button class="fchip" data-tag="cricket" onclick="filterFeed('cricket',this)">🏏 Cricket</button>
+      <button class="fchip" data-tag="football" onclick="filterFeed('football',this)">⚽ Football</button>
+      <button class="fchip" data-tag="fitness" onclick="filterFeed('fitness',this)">💪 Fitness</button>
+      <button class="fchip" data-tag="art" onclick="filterFeed('art',this)">🎨 Art</button>
+      <button class="fchip" data-tag="shopping" onclick="filterFeed('shopping',this)">🛍️ Shop</button>
+    </div>
+    <div id="feed-grid" class="masonry-grid">
+      <!-- Cards injected by JS -->
+    </div>
+    <div id="feed-loading" class="state-msg">
+      <div class="spinner"></div><p>Loading your feed…</p>
+    </div>
+    <div id="feed-empty" class="state-msg hidden">
+      <i class="fas fa-map-signs state-icon"></i>
+      <p>No places here. Try another filter!</p>
+    </div>
+  </section>
+
+  <!-- -------- VIDEOS PAGE -------- -->
+  <section id="videos-page" class="app-page hidden">
+    <div class="page-top">
+      <div>
+        <h2 class="page-h2">Explore Reels</h2>
+        <p class="page-sub">Real experiences from the community</p>
+      </div>
+      <button class="btn-upload-hdr" onclick="openUploadModal()">
+        <i class="fas fa-plus"></i> Upload
+      </button>
+    </div>
+    <div id="videos-grid" class="videos-grid"></div>
+    <div id="videos-loading" class="state-msg">
+      <div class="spinner"></div><p>Loading reels…</p>
+    </div>
+    <div id="videos-empty" class="state-msg hidden">
+      <i class="fas fa-video state-icon"></i>
+      <p>No videos yet. Be the first to share!</p>
+      <button class="btn-primary mt-2" onclick="openUploadModal()">
+        <i class="fas fa-plus"></i> Upload Your First Reel
+      </button>
+    </div>
+  </section>
+
+  <!-- -------- PROFILE PAGE -------- -->
+  <section id="profile-page" class="app-page hidden">
+    <div class="profile-hero">
+      <div class="avatar-ring">
+        <div class="profile-avatar" id="profile-avatar">
+          <i class="fas fa-user"></i>
+        </div>
+      </div>
+      <h3 id="profile-name">Loading…</h3>
+      <p id="profile-email" class="profile-email-txt"></p>
+      <div class="profile-stats-row">
+        <div class="pstat"><span id="stat-points">0</span><small>Points</small></div>
+        <div class="pstat-div"></div>
+        <div class="pstat"><span id="stat-videos">0</span><small>Reels</small></div>
+        <div class="pstat-div"></div>
+        <div class="pstat"><span id="stat-explored">0</span><small>Explored</small></div>
+      </div>
+    </div>
+
+    <div class="profile-section">
+      <h4 class="section-h4">My Interests</h4>
+      <div id="profile-interests" class="profile-tags-row"></div>
+    </div>
+
+    <div class="profile-section">
+      <h4 class="section-h4">Tag Activity</h4>
+      <div id="profile-tag-bars" class="tag-bars"></div>
+    </div>
+
+    <div class="profile-section">
+      <h4 class="section-h4">My Videos</h4>
+      <div id="profile-videos-grid" class="profile-vgrid"></div>
+      <p id="profile-no-videos" class="no-content-msg hidden">Upload videos to earn points!</p>
+    </div>
+
+    <button class="btn-logout" onclick="handleLogout()">
+      <i class="fas fa-sign-out-alt"></i> Sign Out
+    </button>
+  </section>
+
+  <!-- Bottom Nav -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-page="feed" onclick="switchPage('feed',this)">
+      <i class="fas fa-home"></i><span>Feed</span>
+    </button>
+    <button class="nav-btn" data-page="videos" onclick="switchPage('videos',this)">
+      <i class="fas fa-play-circle"></i><span>Reels</span>
+    </button>
+    <button class="nav-btn" data-page="profile" onclick="switchPage('profile',this)">
+      <i class="fas fa-user"></i><span>Me</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ===================== PLACE DETAIL MODAL ===================== -->
+<div id="place-modal" class="modal-overlay hidden" onclick="closePlaceModal(event)">
+  <div class="modal-sheet" id="place-modal-sheet">
+    <div class="modal-drag-bar"></div>
+    <button class="modal-close-btn" onclick="closePlaceModal()"><i class="fas fa-times"></i></button>
+    <div id="place-modal-body"></div>
+  </div>
+</div>
+
+<!-- ===================== UPLOAD MODAL ===================== -->
+<div id="upload-modal" class="modal-overlay hidden" onclick="closeUploadModal(event)">
+  <div class="modal-sheet upload-sheet">
+    <div class="modal-drag-bar"></div>
+    <button class="modal-close-btn" onclick="closeUploadModal()"><i class="fas fa-times"></i></button>
+    <h3 class="modal-title">Share Your Experience</h3>
+    <div class="points-hint"><i class="fas fa-star"></i> Earn +10 points for uploading!</div>
+    <form id="upload-form" onsubmit="handleVideoUpload(event)">
+      <div class="field-group">
+        <label class="field-label">Place Visited</label>
+        <select id="upload-place" required class="form-select">
+          <option value="">Choose a place…</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Your Video</label>
+        <div class="drop-zone" id="drop-zone" onclick="document.getElementById('video-file-input').click()">
+          <i class="fas fa-cloud-upload-alt"></i>
+          <p>Tap to select video</p>
+          <small>MP4, MOV — up to 50MB</small>
+          <input type="file" id="video-file-input" accept="video/*" style="display:none" onchange="handleFileSelect(event)" />
+        </div>
+        <div id="file-preview-wrap" class="file-preview hidden"></div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Caption <small>(optional)</small></label>
+        <textarea id="upload-caption" placeholder="What was it like? Tell the community…" rows="2" class="form-textarea"></textarea>
+      </div>
+      <div id="upload-progress-wrap" class="hidden">
+        <div class="progress-track"><div class="progress-fill" id="upload-progress-fill"></div></div>
+        <span id="upload-progress-txt">Uploading…</span>
+      </div>
+      <button type="submit" class="btn-primary full-w" id="upload-submit">
+        <i class="fas fa-paper-plane"></i> Share &amp; Earn Points
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ===================== TOAST ===================== -->
+<div id="toast" class="toast hidden">
+  <i class="fas fa-check-circle" id="toast-icon"></i>
+  <span id="toast-msg">Done!</span>
+</div>
+
+<!-- ===================== Firebase SDKs (v9 Compat) ===================== -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+
+<!-- Google Maps (replace YOUR_MAPS_KEY_HERE with your API key) -->
+<script>
+  window.initMapsCallback = function () {
+    window._mapsReady = true;
+    if (window._onMapsReady) window._onMapsReady();
+  };
+</script>
+<script src="https://maps.googleapis.com/maps/api/js?key=YOUR_MAPS_KEY_HERE&libraries=places&callback=initMapsCallback" async defer onerror="window._mapsError=true"></script>
+
+<script src="script.js"></script>
+</body>
+</html>
