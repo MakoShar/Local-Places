@@ -150,9 +150,30 @@
           <i class="fas fa-search field-icon"></i>
           <input type="text" id="location-search" placeholder="Search your city or address…" autocomplete="off" />
         </div>
+        <p id="maps-help" class="maps-help hidden">
+          Map is unavailable right now. You can still continue by entering latitude and longitude manually.
+        </p>
         <div id="map-container">
           <div id="onboarding-map"></div>
         </div>
+        <div class="or-divider small"><span>or set manually</span></div>
+        <div class="manual-location-grid">
+          <div class="field-wrap">
+            <i class="fas fa-map-pin field-icon"></i>
+            <input type="number" id="manual-lat" placeholder="Latitude (e.g. 22.7196)" step="any" />
+          </div>
+          <div class="field-wrap">
+            <i class="fas fa-map-pin field-icon"></i>
+            <input type="number" id="manual-lng" placeholder="Longitude (e.g. 75.8577)" step="any" />
+          </div>
+        </div>
+        <div class="field-wrap mt-2">
+          <i class="fas fa-location-dot field-icon"></i>
+          <input type="text" id="manual-label" placeholder="City or area name (optional)" autocomplete="off" />
+        </div>
+        <button type="button" class="btn-ghost full-w mt-2" onclick="setManualLocation()">
+          <i class="fas fa-check"></i> Set Manual Location
+        </button>
         <div id="location-set-badge" class="loc-badge hidden">
           <i class="fas fa-check-circle"></i>
           <span id="location-display">Location set</span>
@@ -170,127 +191,158 @@
 
 <!-- ===================== MAIN APP ===================== -->
 <div id="app-view" class="hidden">
-
-  <!-- Top Header -->
-  <header class="top-header">
-    <div class="hdr-brand">
-      <i class="fas fa-map-marker-alt"></i><span>LocalPlaces</span>
-    </div>
-    <div class="hdr-right">
-      <div class="pts-pill" id="pts-pill">
-        <i class="fas fa-star"></i><span id="hdr-points">0</span> pts
-      </div>
-    </div>
-  </header>
-
-  <!-- -------- FEED PAGE -------- -->
-  <section id="feed-page" class="app-page active-page">
-    <div class="page-top">
-      <div>
-        <h2 class="page-h2">For You <span class="ai-tag">AI</span></h2>
-        <p class="page-sub" id="feed-sub">Sorted by your interests &amp; location</p>
-      </div>
-    </div>
-    <div class="filter-row" id="filter-row">
-      <button class="fchip active-chip" data-tag="all" onclick="filterFeed('all',this)">✨ All</button>
-      <button class="fchip" data-tag="walking" onclick="filterFeed('walking',this)">🚶 Walking</button>
-      <button class="fchip" data-tag="food" onclick="filterFeed('food',this)">🍔 Food</button>
-      <button class="fchip" data-tag="history" onclick="filterFeed('history',this)">🏛️ History</button>
-      <button class="fchip" data-tag="nature" onclick="filterFeed('nature',this)">🌿 Nature</button>
-      <button class="fchip" data-tag="cricket" onclick="filterFeed('cricket',this)">🏏 Cricket</button>
-      <button class="fchip" data-tag="football" onclick="filterFeed('football',this)">⚽ Football</button>
-      <button class="fchip" data-tag="fitness" onclick="filterFeed('fitness',this)">💪 Fitness</button>
-      <button class="fchip" data-tag="art" onclick="filterFeed('art',this)">🎨 Art</button>
-      <button class="fchip" data-tag="shopping" onclick="filterFeed('shopping',this)">🛍️ Shop</button>
-    </div>
-    <div id="feed-grid" class="masonry-grid">
-      <!-- Cards injected by JS -->
-    </div>
-    <div id="feed-loading" class="state-msg">
-      <div class="spinner"></div><p>Loading your feed…</p>
-    </div>
-    <div id="feed-empty" class="state-msg hidden">
-      <i class="fas fa-map-signs state-icon"></i>
-      <p>No places here. Try another filter!</p>
-    </div>
-  </section>
-
-  <!-- -------- VIDEOS PAGE -------- -->
-  <section id="videos-page" class="app-page hidden">
-    <div class="page-top">
-      <div>
-        <h2 class="page-h2">Explore Reels</h2>
-        <p class="page-sub">Real experiences from the community</p>
-      </div>
-      <button class="btn-upload-hdr" onclick="openUploadModal()">
-        <i class="fas fa-plus"></i> Upload
-      </button>
-    </div>
-    <div id="videos-grid" class="videos-grid"></div>
-    <div id="videos-loading" class="state-msg">
-      <div class="spinner"></div><p>Loading reels…</p>
-    </div>
-    <div id="videos-empty" class="state-msg hidden">
-      <i class="fas fa-video state-icon"></i>
-      <p>No videos yet. Be the first to share!</p>
-      <button class="btn-primary mt-2" onclick="openUploadModal()">
-        <i class="fas fa-plus"></i> Upload Your First Reel
-      </button>
-    </div>
-  </section>
-
-  <!-- -------- PROFILE PAGE -------- -->
-  <section id="profile-page" class="app-page hidden">
-    <div class="profile-hero">
-      <div class="avatar-ring">
-        <div class="profile-avatar" id="profile-avatar">
-          <i class="fas fa-user"></i>
+  <div class="dash-shell">
+    <aside class="left-sidebar">
+      <div class="sidebar-profile">
+        <div class="profile-avatar-sm" id="sidebar-profile-avatar">U</div>
+        <div class="profile-meta-sm">
+          <h4 id="sidebar-profile-name">User</h4>
+          <p id="sidebar-profile-email">user@email.com</p>
+        </div>
+        <div class="profile-actions-sm">
+          <button class="btn-mini" type="button" onclick="openSettingsModal()"><i class="fas fa-gear"></i> Settings</button>
+          <button class="btn-mini" type="button" onclick="handleLogout()"><i class="fas fa-sign-out-alt"></i> Logout</button>
         </div>
       </div>
-      <h3 id="profile-name">Loading…</h3>
-      <p id="profile-email" class="profile-email-txt"></p>
-      <div class="profile-stats-row">
-        <div class="pstat"><span id="stat-points">0</span><small>Points</small></div>
-        <div class="pstat-div"></div>
-        <div class="pstat"><span id="stat-videos">0</span><small>Reels</small></div>
-        <div class="pstat-div"></div>
-        <div class="pstat"><span id="stat-explored">0</span><small>Explored</small></div>
+
+      <div class="side-brand">
+        <div class="brand-icon"><i class="fas fa-map-marker-alt"></i></div>
+        <div>
+          <h2>LocalPlaces</h2>
+          <p>AI Local Commerce</p>
+        </div>
       </div>
-    </div>
+      <nav class="side-nav">
+        <button class="nav-btn active" data-page="home" onclick="switchPage('home',this)"><i class="fas fa-house"></i><span>Home</span></button>
+        <button class="nav-btn" data-page="form" onclick="switchPage('form',this)"><i class="fas fa-file-signature"></i><span>Form</span></button>
+        <button class="nav-btn" data-page="feed" onclick="switchPage('feed',this)"><i class="fas fa-video"></i><span>Feed</span></button>
+        <button class="nav-btn" data-page="request" onclick="switchPage('request',this)"><i class="fas fa-briefcase"></i><span>Request Custom Work</span></button>
+        <button class="nav-btn" data-page="vacancy" onclick="switchPage('vacancy',this)"><i class="fas fa-user-tie"></i><span>Vacancies</span></button>
+      </nav>
+      <button class="btn-ghost" onclick="exportLoginInfoJson()"><i class="fas fa-download"></i> Export login-info.json</button>
+    </aside>
 
-    <div class="profile-section">
-      <h4 class="section-h4">My Interests</h4>
-      <div id="profile-interests" class="profile-tags-row"></div>
-    </div>
+    <main class="dash-main">
+      <header class="dash-topbar">
+        <div>
+          <h2 id="dash-title">Welcome back</h2>
+          <p id="feed-sub">AI recommendations based on your preferences and behavior</p>
+        </div>
+        <div class="pts-pill" id="pts-pill"><i class="fas fa-star"></i><span id="hdr-points">0</span> pts</div>
+      </header>
 
-    <div class="profile-section">
-      <h4 class="section-h4">Tag Activity</h4>
-      <div id="profile-tag-bars" class="tag-bars"></div>
-    </div>
+      <section id="home-page" class="app-page active-page">
+        <div class="home-grid">
+          <article class="panel-card">
+            <h3>Embedded Product Chatbot</h3>
+            <p class="panel-sub">Ask what you need and get product suggestions with direct links.</p>
+            <form id="chatbot-form" class="inline-form" onsubmit="handleProductChat(event)">
+              <input id="chat-query" type="text" placeholder="Ask: need shoes under 2000, cafe speaker, laptop bag..." required />
+              <button type="submit" class="btn-primary">Get Suggestions</button>
+            </form>
+            <div id="chat-results" class="cards-grid"></div>
+          </article>
 
-    <div class="profile-section">
-      <h4 class="section-h4">My Videos</h4>
-      <div id="profile-videos-grid" class="profile-vgrid"></div>
-      <p id="profile-no-videos" class="no-content-msg hidden">Upload videos to earn points!</p>
-    </div>
+          <article class="panel-card">
+            <h3>Personalized Dashboard</h3>
+            <p class="panel-sub">Learns from viewed products and purchase history saved locally.</p>
+            <div class="kpi-row hidden" id="personalized-summary">
+              <div class="kpi"><span id="kpi-views">0</span><small>Viewed Products</small></div>
+              <div class="kpi"><span id="kpi-purchases">0</span><small>Purchases</small></div>
+              <div class="kpi"><span id="kpi-top">None</span><small>Top Category</small></div>
+            </div>
+            <h4 class="section-h4">Recommended Places & Services</h4>
+            <div id="personalized-filters" class="filter-row personalized-filters"></div>
+            <p id="personalized-hint" class="panel-sub">Tap a filter to discover nearby open places using Google Maps data.</p>
+            <div id="feed-grid" class="masonry-grid"></div>
+            <div id="feed-loading" class="state-msg"><div class="spinner"></div><p>Loading your personalized dashboard…</p></div>
+            <div id="feed-empty" class="state-msg hidden"><i class="fas fa-map-signs state-icon"></i><p>No recommendations yet.</p></div>
+            <section id="other-open-section" class="other-open-section hidden">
+              <h4 class="section-h4">Other Nearby Shops</h4>
+              <p class="panel-sub">All nearby places from Google Maps that are not shown in the selected personalized list.</p>
+              <div id="other-open-loading" class="state-msg hidden"><div class="spinner"></div><p>Loading nearby shops…</p></div>
+              <p id="other-open-empty" class="panel-sub hidden">No additional nearby shops found right now.</p>
+              <div id="other-open-grid" class="masonry-grid"></div>
+            </section>
+          </article>
+        </div>
+      </section>
 
-    <button class="btn-logout" onclick="handleLogout()">
-      <i class="fas fa-sign-out-alt"></i> Sign Out
-    </button>
-  </section>
+      <section id="form-page" class="app-page hidden">
+        <article class="panel-card">
+          <h3>Community Form</h3>
+          <p class="panel-sub">Help others by posting promotions, alerts, or complaints about local places.</p>
+          <form class="stack-form" onsubmit="submitCommunityPost(event)">
+            <input id="form-place" type="text" placeholder="Place name (e.g. ABC Restaurant)" required />
+            <select id="form-type" required title="Community post type" aria-label="Community post type">
+              <option value="">Select post type</option>
+              <option value="promotion">Promotion</option>
+              <option value="complaint">Complaint</option>
+              <option value="review">Review</option>
+            </select>
+            <textarea id="form-message" placeholder="Write your post..." rows="3" required></textarea>
+            <button class="btn-primary" type="submit">Publish Post</button>
+          </form>
+          <div id="form-list" class="list-stack"></div>
+        </article>
+      </section>
 
-  <!-- Bottom Nav -->
-  <nav class="bottom-nav">
-    <button class="nav-btn active" data-page="feed" onclick="switchPage('feed',this)">
-      <i class="fas fa-home"></i><span>Feed</span>
-    </button>
-    <button class="nav-btn" data-page="videos" onclick="switchPage('videos',this)">
-      <i class="fas fa-play-circle"></i><span>Reels</span>
-    </button>
-    <button class="nav-btn" data-page="profile" onclick="switchPage('profile',this)">
-      <i class="fas fa-user"></i><span>Me</span>
-    </button>
-  </nav>
+      <section id="feed-page" class="app-page hidden">
+        <article class="panel-card">
+          <h3>Reality Feed</h3>
+          <p class="panel-sub">Upload a video link and share the real experience of a place.</p>
+          <form class="stack-form" onsubmit="submitRealityFeed(event)">
+            <input id="feed-place" type="text" placeholder="Place name" required />
+            <input id="feed-video-url" type="url" placeholder="Video URL (YouTube/Drive/Instagram)" required />
+            <textarea id="feed-note" placeholder="How was the real experience?" rows="3" required></textarea>
+            <button class="btn-primary" type="submit">Add to Feed</button>
+          </form>
+          <div id="reality-feed-list" class="cards-grid"></div>
+        </article>
+      </section>
+
+      <section id="request-page" class="app-page hidden">
+        <article class="panel-card">
+          <h3>Request A Custom Work</h3>
+          <p class="panel-sub">Post your event or custom job request. Businesses can contact you to fulfill it.</p>
+          <form class="stack-form" onsubmit="submitCustomWorkRequest(event)">
+            <input id="work-title" type="text" placeholder="Work title (e.g. Birthday party for 50)" required />
+            <textarea id="work-details" rows="3" placeholder="Share requirements, date, budget range..." required></textarea>
+            <input id="work-contact" type="text" placeholder="Your contact preference" required />
+            <button class="btn-primary" type="submit">Post Request</button>
+          </form>
+          <div id="work-request-list" class="list-stack"></div>
+        </article>
+      </section>
+
+      <section id="vacancy-page" class="app-page hidden">
+        <article class="panel-card">
+          <h3>Vacancies</h3>
+          <p class="panel-sub">Businesses can post jobs and local users can apply directly.</p>
+          <form class="stack-form" onsubmit="submitVacancy(event)">
+            <input id="vacancy-role" type="text" placeholder="Job role" required />
+            <input id="vacancy-business" type="text" placeholder="Business name" required />
+            <textarea id="vacancy-details" rows="3" placeholder="Experience, salary, location, shift..." required></textarea>
+            <button class="btn-primary" type="submit">Post Vacancy</button>
+          </form>
+          <div id="vacancy-list" class="list-stack"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="settings-modal" class="modal-overlay hidden" onclick="closeSettingsModal(event)">
+  <div class="modal-sheet" id="settings-modal-sheet">
+    <div class="modal-drag-bar"></div>
+    <button class="modal-close-btn" title="Close settings" onclick="closeSettingsModal()"><i class="fas fa-times"></i></button>
+    <h3 class="modal-title">Profile Settings</h3>
+    <form id="settings-form" class="stack-form" onsubmit="saveProfileSettings(event)">
+      <input id="settings-name" type="text" placeholder="Your name" required />
+      <input id="settings-email" type="email" placeholder="Your email" required />
+      <button class="btn-primary" type="submit">Save Settings</button>
+    </form>
+  </div>
 </div>
 
 <!-- ===================== PLACE DETAIL MODAL ===================== -->
@@ -360,7 +412,7 @@
     if (window._onMapsReady) window._onMapsReady();
   };
 </script>
-<script src="https://maps.googleapis.com/maps/api/js?key=YOUR_MAPS_KEY_HERE&libraries=places&callback=initMapsCallback" async defer onerror="window._mapsError=true"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBkEJ3475FKjkUKEBdxvBJqEL4PLhY0nPk&libraries=places&callback=initMapsCallback" async defer onerror="window._mapsError=true; if (window.handleMapsUnavailable) window.handleMapsUnavailable();"></script>
 
 <script src="script.js"></script>
 </body>
