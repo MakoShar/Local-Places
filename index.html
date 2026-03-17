@@ -218,6 +218,7 @@
         <button class="nav-btn" data-page="feed" onclick="switchPage('feed',this)"><i class="fas fa-video"></i><span>Feed</span></button>
         <button class="nav-btn" data-page="request" onclick="switchPage('request',this)"><i class="fas fa-briefcase"></i><span>Request Custom Work</span></button>
         <button class="nav-btn" data-page="vacancy" onclick="switchPage('vacancy',this)"><i class="fas fa-user-tie"></i><span>Vacancies</span></button>
+        <button class="nav-btn" data-page="comparization" onclick="switchPage('comparization',this)"><i class="fas fa-scale-balanced"></i><span>Products Comparization</span></button>
       </nav>
       <button class="btn-ghost" onclick="exportLoginInfoJson()"><i class="fas fa-download"></i> Export login-info.json</button>
     </aside>
@@ -347,6 +348,35 @@
             <button class="btn-primary" type="submit">Post Vacancy</button>
           </form>
           <div id="vacancy-list" class="list-stack"></div>
+        </article>
+      </section>
+
+      <section id="comparization-page" class="app-page hidden">
+        <article class="panel-card">
+          <h3>Products Comparization</h3>
+          <p class="panel-sub">Compare top trending online product prices with local shop prices and spot savings quickly.</p>
+          <div class="kpi-row" id="comparization-kpi-row">
+            <div class="kpi"><span id="cmp-total-products">0</span><small>Trending products tracked</small></div>
+            <div class="kpi"><span id="cmp-online-better">0</span><small>Cheaper online</small></div>
+            <div class="kpi"><span id="cmp-local-better">0</span><small>Cheaper in local shops</small></div>
+          </div>
+          <div class="comparison-table-wrap">
+            <table class="comparison-table" aria-label="Trending product price comparison">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Trending Rank</th>
+                  <th>Score</th>
+                  <th>Online Price</th>
+                  <th>Local Shop Price</th>
+                  <th>Difference</th>
+                  <th>Best Option</th>
+                  <th>Verify Links</th>
+                </tr>
+              </thead>
+              <tbody id="product-comparison-list"></tbody>
+            </table>
+          </div>
         </article>
       </section>
     </main>

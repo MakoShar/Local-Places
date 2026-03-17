@@ -45,6 +45,7 @@ let activeFilter = 'all';
 let obMap = null;   // Onboarding Google Map
 let obMarker = null;
 let selectedInterests = new Set();
+let activePlaceDashboardSession = null;
 
 const LOCAL_USER_KEY_PREFIX = 'localplaces_user_';
 const LOGIN_INFO_KEY = 'localplaces_login_info';
@@ -346,6 +347,9 @@ const DISTANCE_FILTERS_KM = [3, 5, 10, 20];
 let selectedDistanceFilterKm = 10;
 const recommendationContextCache = new Map();
 
+const API_BASE_URL = (window.LOCALPLACES_API_BASE || 'http://localhost:4000/api').replace(/\/$/, '');
+const BACKEND_GUEST_KEY = 'localplaces_backend_guest_id';
+
 const CATEGORY_SEARCH_CONFIG = {
   food: { label: 'Food / Pizza', emoji: '🍕', keyword: 'pizza restaurant', type: 'restaurant' },
   shopping: { label: 'Shopping', emoji: '🛍️', keyword: 'shopping mall store', type: 'shopping_mall' },
@@ -398,6 +402,19 @@ const PRODUCT_CATALOG = [
   { id: 'p6', name: 'Restaurant POS Tablet', category: 'food', site: 'IndiaMART', url: 'https://dir.indiamart.com/search.mp?ss=restaurant+pos+machine', price: 'INR 8,000+' },
   { id: 'p7', name: 'Decor Lights for Events', category: 'art', site: 'Amazon', url: 'https://www.amazon.in/s?k=decor+lights+party', price: 'INR 799+' },
   { id: 'p8', name: 'Cafe Outdoor Plants', category: 'nature', site: 'NurseryLive', url: 'https://nurserylive.com/collections/outdoor-plants', price: 'INR 299+' },
+];
+
+const TRENDING_PRODUCT_PRICES = [
+  { id: 'tp1', name: 'Wireless Earbuds', onlinePrice: 1980, localPrice: 2140, trendingRank: 1 },
+  { id: 'tp2', name: 'Smart Watch', onlinePrice: 2299, localPrice: 2450, trendingRank: 2 },
+  { id: 'tp3', name: 'Running Shoes', onlinePrice: 1899, localPrice: 1750, trendingRank: 3 },
+  { id: 'tp4', name: 'Protein Powder 1kg', onlinePrice: 2099, localPrice: 1990, trendingRank: 4 },
+  { id: 'tp5', name: 'Bluetooth Speaker', onlinePrice: 1299, localPrice: 1450, trendingRank: 5 },
+  { id: 'tp6', name: 'Backpack 35L', onlinePrice: 999, localPrice: 1120, trendingRank: 6 },
+  { id: 'tp7', name: 'Cricket Bat', onlinePrice: 1799, localPrice: 1690, trendingRank: 7 },
+  { id: 'tp8', name: 'Football Studs', onlinePrice: 1490, localPrice: 1599, trendingRank: 8 },
+  { id: 'tp9', name: 'Mixer Grinder', onlinePrice: 3299, localPrice: 3440, trendingRank: 9 },
+  { id: 'tp10', name: 'LED Study Lamp', onlinePrice: 599, localPrice: 620, trendingRank: 10 },
 ];
 
 // Sample places for Indore, MP (seeded on first launch)
@@ -510,6 +527,157 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 /** Format distance nicely */
 function fmtDist(km) {
   return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
+}
+
+function fmtInr(amount) {
+  return `INR ${Number(amount || 0).toLocaleString('en-IN')}`;
+}
+
+function buildVerificationLinks(productName) {
+  const q = encodeURIComponent(productName);
+  return {
+    amazon: `https://www.amazon.in/s?k=${q}`,
+    flipkart: `https://www.flipkart.com/search?q=${q}`,
+    other: `https://www.indiamart.com/search.mp?ss=${q}`,
+    local: `https://www.google.com/maps/search/${q}+near+me`,
+  };
+}
+
+function computeComparisonProductScore(item) {
+  const total = Math.max(TRENDING_PRODUCT_PRICES.length - 1, 1);
+  const preference = Math.max(0, 1 - ((item.trendingRank - 1) / total));
+  const priceGap = Math.abs(Number(item.localPrice || 0) - Number(item.onlinePrice || 0));
+  const baseline = Math.max(Number(item.onlinePrice || 1), Number(item.localPrice || 1), 1);
+  const distance = Math.max(0, 1 - (priceGap / baseline));
+  const time = ['Afternoon', 'Evening'].includes(getTimeBucket()) ? 1 : 0.7;
+  const popularity = preference;
+
+  return (
+    preference * SCORE_WEIGHTS.preference +
+    distance * SCORE_WEIGHTS.distance +
+    time * SCORE_WEIGHTS.time +
+    popularity * SCORE_WEIGHTS.popularity
+  );
+}
+
+function getBackendUserId() {
+  if (currentUser?.uid) return currentUser.uid;
+  let guestId = localStorage.getItem(BACKEND_GUEST_KEY);
+  if (!guestId) {
+    guestId = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    localStorage.setItem(BACKEND_GUEST_KEY, guestId);
+  }
+  return guestId;
+}
+
+async function backendPost(path, payload) {
+  try {
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (error) {
+    console.warn(`Backend request failed for ${path}`, error.message || error);
+    return null;
+  }
+}
+
+function toScorablePlace(place, category) {
+  const lat = place?.geometry?.location?.lat ? place.geometry.location.lat() : null;
+  const lng = place?.geometry?.location?.lng ? place.geometry.location.lng() : null;
+  const sourceCategory = place?._sourceCategory || category;
+  const tags = [...new Set([sourceCategory, ...(place?.types || [])].filter(Boolean))];
+  return {
+    placeId: place?.place_id,
+    name: place?.name || 'Unknown',
+    category: sourceCategory,
+    tags,
+    location: (lat !== null && lng !== null) ? { lat, lng } : null,
+    rating: Number(place?.rating || 0),
+    reviewCount: Number(place?.user_ratings_total || 0),
+  };
+}
+
+function placeMatchesSelectedTag(place, selectedCategory) {
+  if (!selectedCategory) return true;
+  const source = place?._sourceCategory;
+  if (source === selectedCategory) return true;
+
+  const tagCandidates = new Set([...(place?.types || []), ...(getPlaceTagsForCard(place, source || selectedCategory) || [])]
+    .map(tag => String(tag || '').toLowerCase()));
+
+  const selectedCfg = CATEGORY_SEARCH_CONFIG[selectedCategory];
+  const selectedTokens = new Set([
+    selectedCategory,
+    selectedCfg?.type,
+    ...(selectedCfg?.keyword ? selectedCfg.keyword.split(' ') : []),
+  ].filter(Boolean).map(x => String(x).toLowerCase()));
+
+  for (const token of selectedTokens) {
+    if (tagCandidates.has(token)) return true;
+  }
+  return false;
+}
+
+async function trackTagClickBackend(tag, placeId) {
+  backendPost('/interactions/click', {
+    userId: getBackendUserId(),
+    tag,
+    placeId,
+    source: 'dashboard',
+  });
+}
+
+async function trackDashboardTimeBackend(tag, placeId, durationSec) {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return;
+  backendPost('/interactions/time', {
+    userId: getBackendUserId(),
+    tag,
+    placeId,
+    durationSec,
+    source: 'place-dashboard',
+  });
+}
+
+async function trackImpressionsBackend(items, selectedTag) {
+  if (!Array.isArray(items) || !items.length) return;
+  const payloadItems = items.map(item => {
+    const place = item.place || item;
+    return {
+      placeId: place?.place_id,
+      name: place?.name,
+      rating: Number(place?.rating || 0),
+      reviewCount: Number(place?.user_ratings_total || 0),
+      category: place?._sourceCategory || selectedTag,
+    };
+  }).filter(x => x.placeId);
+
+  if (!payloadItems.length) return;
+  backendPost('/interactions/impression', {
+    userId: getBackendUserId(),
+    selectedTag,
+    items: payloadItems,
+  });
+}
+
+async function rankPlacesViaBackend(places, selectedCategory, center) {
+  const payloadPlaces = (places || []).map(place => toScorablePlace(place, selectedCategory)).filter(p => p.placeId);
+  if (!payloadPlaces.length) return null;
+
+  const response = await backendPost('/recommendations/rank', {
+    userId: getBackendUserId(),
+    selectedTag: selectedCategory,
+    currentLocation: center,
+    weights: SCORE_WEIGHTS,
+    places: payloadPlaces,
+  });
+
+  if (!response || !Array.isArray(response.ranked)) return null;
+  const rankMap = new Map(response.ranked.map(item => [item.placeId, item]));
+  return rankMap;
 }
 
 function getCurrentHour() {
@@ -1641,6 +1809,17 @@ async function openPlaceModal(place, dist) {
 
 function closePlaceModal(e) {
   if (e && e.target !== document.getElementById('place-modal') && !e.target.classList.contains('modal-close-btn')) return;
+
+  if (activePlaceDashboardSession) {
+    const durationSec = Math.round((Date.now() - activePlaceDashboardSession.startedAt) / 1000);
+    trackDashboardTimeBackend(
+      activePlaceDashboardSession.category,
+      activePlaceDashboardSession.placeId,
+      durationSec,
+    );
+    activePlaceDashboardSession = null;
+  }
+
   document.getElementById('place-modal').classList.add('hidden');
   document.body.style.overflow = '';
 }
@@ -2051,6 +2230,7 @@ function renderChatResults(items) {
     card.className = 'product-card';
     card.innerHTML = `
       <h4>${item.name}</h4>
+      <div class="product-score"><i class="fas fa-chart-line"></i> Score ${Number(item.score || 0).toFixed(1)}</div>
       <p>${item.site} • ${item.price} • ${item.category}</p>
       <div class="product-actions">
         <button class="btn-mini" onclick="trackProductView('${item.id}')">View</button>
@@ -2198,12 +2378,14 @@ async function handleProductChat(e) {
 function trackProductView(productId) {
   const item = PRODUCT_CATALOG.find(p => p.id === productId);
   bumpProductMetric('view', item?.category);
+  if (item?.category) trackTagClickBackend(item.category, productId);
   if (item?.category) selectPersonalizedFilter(item.category);
 }
 
 function trackProductPurchase(productId) {
   const item = PRODUCT_CATALOG.find(p => p.id === productId);
   bumpProductMetric('purchase', item?.category);
+  if (item?.category) trackTagClickBackend(item.category, productId);
   if (item?.category) selectPersonalizedFilter(item.category);
 }
 
@@ -2393,7 +2575,10 @@ async function selectPersonalizedFilter(category, btn, trackInteraction = true) 
   }
 
   localStorage.setItem(personalFilterKey(), category);
-  if (trackInteraction) bumpProductMetric('view', category);
+  if (trackInteraction) {
+    bumpProductMetric('view', category);
+    trackTagClickBackend(category, null);
+  }
   await loadNearbyPlacesByCategory(category);
 }
 
@@ -2412,9 +2597,9 @@ async function loadNearbyPlacesByCategory(category) {
   empty.classList.add('hidden');
   grid.innerHTML = '';
   if (otherSection && otherGrid && otherLoading && otherEmpty) {
-    otherSection.classList.remove('hidden');
+    otherSection.classList.add('hidden');
     otherGrid.innerHTML = '';
-    otherLoading.classList.remove('hidden');
+    otherLoading.classList.add('hidden');
     otherEmpty.classList.add('hidden');
   }
 
@@ -2438,12 +2623,47 @@ async function loadNearbyPlacesByCategory(category) {
 
   const center = userData?.location || { lat: 22.7196, lng: 75.8577 };
   try {
-    const results = await searchNearbyByCategory(category, center, { radius: 9000, openNow: false });
+    const primaryResults = await searchNearbyByCategory(category, center, { radius: 9000, openNow: false });
+    primaryResults.forEach(place => {
+      place._sourceCategory = category;
+      nearbyPlaceCache.set(place.place_id, place);
+    });
 
-    results.forEach(place => nearbyPlaceCache.set(place.place_id, place));
+    const selectedIds = new Set(primaryResults.map(place => place.place_id));
+    const otherResults = await loadOtherOpenPlaces(category, [...selectedIds], { render: false });
+
+    const merged = [];
+    const seen = new Set();
+    [...primaryResults, ...(otherResults || [])].forEach(place => {
+      if (!place?.place_id || seen.has(place.place_id)) return;
+      seen.add(place.place_id);
+      merged.push(place);
+    });
+
+    const tagFiltered = merged.filter(place => placeMatchesSelectedTag(place, category));
+    const candidatePlaces = tagFiltered.length ? tagFiltered : merged;
+
+    const backendRankMap = await rankPlacesViaBackend(candidatePlaces, category, center);
+    const ranked = candidatePlaces.map(place => {
+      const backendRank = backendRankMap?.get(place.place_id);
+      const fallback = computeWeightedRecommendation(place, category, center, selectedDistanceFilterKm);
+
+      return {
+        place,
+        finalScore: Number(backendRank?.score ?? fallback.finalScore),
+        components: backendRank?.components || fallback.components,
+        distanceKm: Number.isFinite(backendRank?.distanceKm) ? backendRank.distanceKm : fallback.distanceKm,
+        explanation: backendRank?.explanation || fallback.explanation,
+      };
+    }).filter(item => item.distanceKm === null || item.distanceKm <= selectedDistanceFilterKm);
+
+    ranked.sort((a, b) => b.finalScore - a.finalScore);
+    const topRecommendations = ranked.slice(0, 24);
+
     loading.classList.add('hidden');
-    const selectedIds = renderNearbyPlaces(results, category);
-    await loadOtherOpenPlaces(category, selectedIds);
+    renderNearbyPlaces(topRecommendations, category);
+    trackBusinessRecommendationImpressions(topRecommendations);
+    trackImpressionsBackend(topRecommendations, category);
   } catch (e) {
     console.warn('Nearby search failed', e);
     loading.classList.add('hidden');
@@ -2458,21 +2678,12 @@ async function loadNearbyPlacesByCategory(category) {
   }
 }
 
-function renderNearbyPlaces(places, category) {
+function renderNearbyPlaces(recommendations, category) {
   const grid = document.getElementById('feed-grid');
   const empty = document.getElementById('feed-empty');
   if (!grid || !empty) return;
 
-  const center = userData?.location || { lat: 22.7196, lng: 75.8577 };
-  const withScores = (places || []).map(place => {
-    const score = computeWeightedRecommendation(place, category, center, selectedDistanceFilterKm);
-    return { place, ...score };
-  }).filter(item => item.distanceKm === null || item.distanceKm <= selectedDistanceFilterKm);
-
-  withScores.sort((a, b) => b.finalScore - a.finalScore);
-  const topRecommendations = withScores.slice(0, 18);
-
-  if (!topRecommendations.length) {
+  if (!recommendations?.length) {
     empty.classList.remove('hidden');
     empty.querySelector('p').textContent = `No places found within ${selectedDistanceFilterKm} km. Try a larger distance.`;
     return [];
@@ -2481,11 +2692,13 @@ function renderNearbyPlaces(places, category) {
   empty.classList.add('hidden');
   grid.innerHTML = '';
   recommendationContextCache.clear();
-  topRecommendations.forEach(item => {
+  recommendations.forEach(item => {
     const place = item.place;
+    const scoreLabel = Number(item.finalScore || 0) * 100;
     const openNow = place.opening_hours?.open_now;
     const statusText = openNow === true ? 'Open now' : openNow === false ? 'Closed now' : 'Status unknown';
-    const tags = getPlaceTagsForCard(place, category);
+    const placeCategory = place._sourceCategory || category;
+    const tags = getPlaceTagsForCard(place, placeCategory);
     recommendationContextCache.set(place.place_id, item);
     const card = document.createElement('div');
     card.className = 'feed-card';
@@ -2495,6 +2708,7 @@ function renderNearbyPlaces(places, category) {
         <div class="feed-card-name">${place.name}</div>
         <div class="feed-card-desc">${place.vicinity || 'Nearby place'}</div>
         <div class="panel-sub">${item.explanation}</div>
+        <div class="feed-score"><i class="fas fa-chart-line"></i> Score ${scoreLabel.toFixed(1)}</div>
         <div class="feed-card-meta">
           <span class="feed-rating"><i class="fas fa-star"></i> ${(place.rating || 0).toFixed(1)}</span>
           <span class="feed-distance"><i class="fas fa-location-dot"></i> ${item.distanceKm !== null ? fmtDist(item.distanceKm) : 'Nearby'}</span>
@@ -2504,22 +2718,22 @@ function renderNearbyPlaces(places, category) {
           ${tags.map(tag => `<span class="tag-pill">${tag}</span>`).join('')}
         </div>
         <div class="product-actions" style="margin-top:8px;">
-          <button class="btn-mini" onclick="openNearbyPlaceDashboard('${place.place_id}','${category}')">Open Dashboard</button>
+          <button class="btn-mini" onclick="openNearbyPlaceDashboard('${place.place_id}','${placeCategory}')">Open Dashboard</button>
         </div>
       </div>`;
     grid.appendChild(card);
   });
 
-  trackBusinessRecommendationImpressions(topRecommendations);
-  return topRecommendations.map(item => item.place.place_id);
+  return recommendations.map(item => item.place.place_id);
 }
 
-async function loadOtherOpenPlaces(selectedCategory, selectedPlaceIds = []) {
+async function loadOtherOpenPlaces(selectedCategory, selectedPlaceIds = [], options = {}) {
   const otherSection = document.getElementById('other-open-section');
   const otherGrid = document.getElementById('other-open-grid');
   const otherLoading = document.getElementById('other-open-loading');
   const otherEmpty = document.getElementById('other-open-empty');
-  if (!otherSection || !otherGrid || !otherLoading || !otherEmpty) return;
+  const shouldRender = options.render !== false;
+  if (!otherSection || !otherGrid || !otherLoading || !otherEmpty) return [];
 
   const center = userData?.location || { lat: 22.7196, lng: 75.8577 };
   const selectedIds = new Set(selectedPlaceIds || []);
@@ -2548,9 +2762,10 @@ async function loadOtherOpenPlaces(selectedCategory, selectedPlaceIds = []) {
     });
 
     deduped.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-    renderOtherOpenPlaces(deduped);
+    if (shouldRender) renderOtherOpenPlaces(deduped);
+    return deduped;
   } finally {
-    otherLoading.classList.add('hidden');
+    if (shouldRender) otherLoading.classList.add('hidden');
   }
 }
 
@@ -2597,6 +2812,13 @@ async function openNearbyPlaceDashboard(placeId, category) {
   const base = nearbyPlaceCache.get(placeId);
   if (!base) return;
   const context = recommendationContextCache.get(placeId);
+
+  trackTagClickBackend(category, placeId);
+  activePlaceDashboardSession = {
+    placeId,
+    category,
+    startedAt: Date.now(),
+  };
 
   let detail = base;
   try {
@@ -2785,6 +3007,67 @@ function renderVacancies() {
   });
 }
 
+function renderProductComparization() {
+  const body = document.getElementById('product-comparison-list');
+  const totalEl = document.getElementById('cmp-total-products');
+  const onlineBetterEl = document.getElementById('cmp-online-better');
+  const localBetterEl = document.getElementById('cmp-local-better');
+  if (!body || !totalEl || !onlineBetterEl || !localBetterEl) return;
+
+  const sorted = [...TRENDING_PRODUCT_PRICES].sort((a, b) => a.trendingRank - b.trendingRank);
+  body.innerHTML = '';
+
+  let onlineBetter = 0;
+  let localBetter = 0;
+
+  sorted.forEach(item => {
+    const links = buildVerificationLinks(item.name);
+    const score = computeComparisonProductScore(item);
+    const diff = item.localPrice - item.onlinePrice;
+    let bestOption = 'Tie';
+    let bestTagClass = 'tie';
+    let diffClass = 'cmp-diff-neutral';
+    let diffLabel = 'No difference';
+
+    if (diff > 0) {
+      bestOption = 'Online';
+      bestTagClass = 'online';
+      diffClass = 'cmp-diff-positive';
+      diffLabel = `Save ${fmtInr(diff)}`;
+      onlineBetter += 1;
+    } else if (diff < 0) {
+      bestOption = 'Local Shop';
+      bestTagClass = 'local';
+      diffClass = 'cmp-diff-negative';
+      diffLabel = `Pay ${fmtInr(Math.abs(diff))} more online`;
+      localBetter += 1;
+    }
+
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${item.name}</td>
+      <td>#${item.trendingRank}</td>
+      <td class="cmp-score">${score.toFixed(3)}</td>
+      <td>${fmtInr(item.onlinePrice)}</td>
+      <td>${fmtInr(item.localPrice)}</td>
+      <td class="${diffClass}">${diffLabel}</td>
+      <td><span class="cmp-tag ${bestTagClass}">${bestOption}</span></td>
+      <td>
+        <div class="cmp-links">
+          <a class="cmp-link" href="${links.amazon}" target="_blank" rel="noopener">Amazon</a>
+          <a class="cmp-link" href="${links.flipkart}" target="_blank" rel="noopener">Flipkart</a>
+          <a class="cmp-link" href="${links.other}" target="_blank" rel="noopener">Other</a>
+          <a class="cmp-link" href="${links.local}" target="_blank" rel="noopener">Local Shop</a>
+        </div>
+      </td>`;
+    body.appendChild(row);
+  });
+
+  totalEl.textContent = sorted.length.toLocaleString();
+  onlineBetterEl.textContent = onlineBetter.toLocaleString();
+  localBetterEl.textContent = localBetter.toLocaleString();
+}
+
 function initHackathonDashboard() {
   renderPersonalizedMetrics();
   renderBusinessInsights();
@@ -2797,6 +3080,7 @@ function initHackathonDashboard() {
   renderRealityFeed();
   renderCustomWorkRequests();
   renderVacancies();
+  renderProductComparization();
 }
 
 function switchPage(page, btn) {
@@ -2821,6 +3105,7 @@ function switchPage(page, btn) {
     feed: 'Reality Feed',
     request: 'Request Custom Work',
     vacancy: 'Vacancy Board',
+    comparization: 'Products Comparization',
   };
   const title = document.getElementById('dash-title');
   if (title) title.textContent = titles[page] || 'LocalPlaces';
@@ -2832,6 +3117,7 @@ function switchPage(page, btn) {
   if (page === 'feed') renderRealityFeed();
   if (page === 'request') renderCustomWorkRequests();
   if (page === 'vacancy') renderVacancies();
+  if (page === 'comparization') renderProductComparization();
 }
 
 function updateHeaderPoints() {
