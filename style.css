@@ -1034,6 +1034,30 @@ img { display: block; max-width: 100%; }
 .product-card h4 { font-size: 14px; margin-bottom: 4px; }
 .product-card p { color: var(--text-2); font-size: 12px; margin-bottom: 8px; }
 
+.map-search-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.map-result-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px;
+  background: rgba(255,255,255,0.03);
+}
+
+.map-result-card h4 {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.map-result-card p {
+  color: var(--text-2);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
 .product-actions {
   display: flex;
   gap: 8px;

@@ -2060,11 +2060,139 @@ function renderChatResults(items) {
   });
 }
 
-function handleProductChat(e) {
+function textSearchPromise(request) {
+  return new Promise((resolve, reject) => {
+    const map = getPlacesService();
+    if (!map) {
+      reject(new Error('Google Maps unavailable'));
+      return;
+    }
+    const service = new google.maps.places.PlacesService(map);
+    service.textSearch(request, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK || status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+        resolve(results || []);
+      } else {
+        reject(new Error(status));
+      }
+    });
+  });
+}
+
+async function searchMapPlacesFromChatQuery(query, center) {
+  if (!window.google || !google.maps || !google.maps.places || window._mapsError) {
+    throw new Error('Google Maps unavailable');
+  }
+
+  const request = {
+    query,
+    location: new google.maps.LatLng(center.lat, center.lng),
+    radius: 10000,
+  };
+
+  const results = await textSearchPromise(request);
+  const deduped = [];
+  const seen = new Set();
+  results.forEach(place => {
+    if (!place?.place_id || seen.has(place.place_id)) return;
+    seen.add(place.place_id);
+    deduped.push(place);
+  });
+
+  deduped.sort((a, b) => {
+    const aLat = a.geometry?.location?.lat?.();
+    const aLng = a.geometry?.location?.lng?.();
+    const bLat = b.geometry?.location?.lat?.();
+    const bLng = b.geometry?.location?.lng?.();
+    const aDist = (Number.isFinite(aLat) && Number.isFinite(aLng)) ? haversineKm(center.lat, center.lng, aLat, aLng) : Number.POSITIVE_INFINITY;
+    const bDist = (Number.isFinite(bLat) && Number.isFinite(bLng)) ? haversineKm(center.lat, center.lng, bLat, bLng) : Number.POSITIVE_INFINITY;
+    if (aDist !== bDist) return aDist - bDist;
+    return (b.rating || 0) - (a.rating || 0);
+  });
+
+  return deduped.slice(0, 24);
+}
+
+function renderMapChatResults(places, center) {
+  const section = document.getElementById('map-chat-section');
+  const grid = document.getElementById('map-chat-results');
+  const empty = document.getElementById('map-chat-empty');
+  if (!section || !grid || !empty) return;
+
+  section.classList.remove('hidden');
+  grid.innerHTML = '';
+
+  if (!places.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+
+  empty.classList.add('hidden');
+  places.forEach(place => {
+    const lat = place.geometry?.location?.lat?.();
+    const lng = place.geometry?.location?.lng?.();
+    const distKm = (Number.isFinite(lat) && Number.isFinite(lng))
+      ? haversineKm(center.lat, center.lng, lat, lng)
+      : null;
+
+    nearbyPlaceCache.set(place.place_id, place);
+
+    const card = document.createElement('div');
+    card.className = 'map-result-card';
+    card.innerHTML = `
+      <h4>${place.name}</h4>
+      <p>${place.formatted_address || place.vicinity || 'Nearby area'}</p>
+      <p>${distKm !== null ? `${fmtDist(distKm)} away` : 'Distance unavailable'} • ⭐ ${(place.rating || 0).toFixed(1)}</p>
+      <div class="product-actions">
+        <button class="btn-mini" onclick="openNearbyPlaceDashboard('${place.place_id}','food')">Open Dashboard</button>
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+
+async function runMapChatSearch(query) {
+  const section = document.getElementById('map-chat-section');
+  const loading = document.getElementById('map-chat-loading');
+  const empty = document.getElementById('map-chat-empty');
+  const hint = document.getElementById('map-chat-hint');
+  const grid = document.getElementById('map-chat-results');
+  if (!section || !loading || !empty || !hint || !grid) return;
+
+  section.classList.remove('hidden');
+  loading.classList.remove('hidden');
+  empty.classList.add('hidden');
+  grid.innerHTML = '';
+  hint.textContent = `Google Maps results for "${query}" near your location.`;
+
+  const center = userData?.location || { lat: 22.7196, lng: 75.8577 };
+  try {
+    const places = await searchMapPlacesFromChatQuery(query, center);
+    renderMapChatResults(places, center);
+    if (!places.length) {
+      empty.classList.remove('hidden');
+      hint.textContent = 'No nearby places matched this query. Try a different phrase.';
+    }
+  } catch {
+    empty.classList.remove('hidden');
+    empty.textContent = 'Google Maps is unavailable. Enable maps and location to run chatbot search.';
+    hint.textContent = 'Maps search needs map access.';
+  } finally {
+    loading.classList.add('hidden');
+  }
+}
+
+async function handleProductChat(e) {
   e.preventDefault();
   const query = document.getElementById('chat-query').value.trim();
-  renderChatResults(rankProductsByQuery(query));
-  showToast('AI suggestions updated.', 'success', 1800);
+  const chatResults = document.getElementById('chat-results');
+  if (chatResults) {
+    chatResults.innerHTML = '<p class="panel-sub">Searching Google Maps with your query...</p>';
+  }
+
+  await runMapChatSearch(query);
+  if (chatResults) {
+    chatResults.innerHTML = '';
+  }
+  showToast('Maps search completed.', 'success', 1800);
 }
 
 function trackProductView(productId) {

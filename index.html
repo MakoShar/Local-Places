@@ -237,13 +237,24 @@
       <section id="home-page" class="app-page active-page">
         <div class="home-grid">
           <article class="panel-card">
-            <h3>Embedded Product Chatbot</h3>
-            <p class="panel-sub">Ask what you need and get product suggestions with direct links.</p>
+            <h3>Where do you want to go next?</h3>
+            <p class="panel-sub">Type anything and we will search Google Maps near your current location.</p>
             <form id="chatbot-form" class="inline-form" onsubmit="handleProductChat(event)">
-              <input id="chat-query" type="text" placeholder="Ask: need shoes under 2000, cafe speaker, laptop bag..." required />
-              <button type="submit" class="btn-primary">Get Suggestions</button>
+              <input id="chat-query" type="text" placeholder="Try: cheap food, tea stall, stationery, gym, tailor..." required />
+              <button type="submit" class="btn-primary">Search Maps</button>
             </form>
             <div id="chat-results" class="cards-grid"></div>
+          </article>
+
+          <article id="map-chat-section" class="panel-card map-search-section hidden" aria-live="polite">
+            <h3>Google Maps Search Results</h3>
+            <p id="map-chat-hint" class="panel-sub">Results for your chatbot query will appear here.</p>
+            <div id="map-chat-loading" class="state-msg hidden">
+              <div class="spinner"></div>
+              <p>Searching Google Maps nearby...</p>
+            </div>
+            <p id="map-chat-empty" class="panel-sub hidden">No nearby places found for this query.</p>
+            <div id="map-chat-results" class="cards-grid"></div>
           </article>
 
           <article class="panel-card">
