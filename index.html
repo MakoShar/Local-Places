@@ -355,6 +355,12 @@
         <article class="panel-card">
           <h3>Products Comparization</h3>
           <p class="panel-sub">Compare top trending online product prices with local shop prices and spot savings quickly.</p>
+          <form class="comparison-search-row" onsubmit="handleComparisonSearch(event)">
+            <input id="comparison-search-input" type="text" placeholder="Search product (example: Boat Headphones, iPhone 15, Cricket Bat)" />
+            <button class="btn-primary" type="submit">Compare Prices</button>
+            <button class="btn-ghost" type="button" onclick="clearComparisonSearch()">Clear</button>
+          </form>
+          <p id="comparison-search-hint" class="panel-sub">Search a product to compare prices across multiple online websites with links and savings.</p>
           <div class="kpi-row" id="comparization-kpi-row">
             <div class="kpi"><span id="cmp-total-products">0</span><small>Trending products tracked</small></div>
             <div class="kpi"><span id="cmp-online-better">0</span><small>Cheaper online</small></div>
@@ -475,14 +481,7 @@
   <span id="toast-msg">Done!</span>
 </div>
 
-<!-- Google Maps (replace YOUR_MAPS_KEY_HERE with your API key) -->
-<script>
-  window.initMapsCallback = function () {
-    window._mapsReady = true;
-    if (window._onMapsReady) window._onMapsReady();
-  };
-</script>
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBkEJ3475FKjkUKEBdxvBJqEL4PLhY0nPk&libraries=places&callback=initMapsCallback" async defer onerror="window._mapsError=true; if (window.handleMapsUnavailable) window.handleMapsUnavailable();"></script>
+<!-- Google Maps is loaded lazily from script.js when required. -->
 
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>

@@ -1109,6 +1109,28 @@ img { display: block; max-width: 100%; }
 
 .btn-mini:hover { border-color: var(--accent); }
 
+.comparison-search-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.comparison-search-row input {
+  width: 100%;
+  border-radius: var(--r-full);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-1);
+  padding: 11px 14px;
+  font-size: 14px;
+}
+
+.comparison-search-row input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .comparison-table-wrap {
   margin-top: 12px;
   border: 1px solid var(--border);
@@ -1316,6 +1338,10 @@ img { display: block; max-width: 100%; }
   }
 
   .inline-form {
+    grid-template-columns: 1fr;
+  }
+
+  .comparison-search-row {
     grid-template-columns: 1fr;
   }
 }
