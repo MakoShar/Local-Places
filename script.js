@@ -709,10 +709,91 @@ function buildSearchComparisonRows(query) {
   }).sort((a, b) => a.onlinePrice - b.onlinePrice);
 }
 
+function normalizeComparisonQuery(query) {
+  return String(query || '')
+    .replace(/headphons/gi, 'headphones')
+    .replace(/earbuds?/gi, 'earbuds')
+    .trim();
+}
+
+function ensureComparisonSearchUi() {
+  const page = document.getElementById('comparization-page');
+  if (!page) return;
+
+  const panel = page.querySelector('.panel-card');
+  if (!panel) return;
+
+  let form = document.querySelector('.comparison-search-row');
+  if (!form) {
+    const kpiRow = document.getElementById('comparization-kpi-row');
+    const searchWrap = document.createElement('form');
+    searchWrap.className = 'comparison-search-row';
+    searchWrap.innerHTML = `
+      <input id="comparison-search-input" type="text" placeholder="Search product (example: Boat Headphones, iPhone 15, Cricket Bat)" />
+      <button class="btn-primary" type="submit">Compare Prices</button>
+      <button class="btn-ghost" type="button" id="comparison-clear-btn">Clear</button>
+    `;
+
+    if (kpiRow?.parentNode) {
+      kpiRow.parentNode.insertBefore(searchWrap, kpiRow);
+    } else {
+      panel.appendChild(searchWrap);
+    }
+    form = searchWrap;
+  }
+
+  if (!document.getElementById('comparison-search-hint')) {
+    const hint = document.createElement('p');
+    hint.id = 'comparison-search-hint';
+    hint.className = 'panel-sub';
+    hint.textContent = 'Search a product to compare prices across multiple online websites with links and savings.';
+    const kpiRow = document.getElementById('comparization-kpi-row');
+    if (kpiRow?.parentNode) {
+      kpiRow.parentNode.insertBefore(hint, kpiRow);
+    } else {
+      panel.appendChild(hint);
+    }
+  }
+
+  const tableBody = document.getElementById('product-comparison-list');
+  if (!tableBody) {
+    const table = page.querySelector('.comparison-table');
+    const tbody = document.createElement('tbody');
+    tbody.id = 'product-comparison-list';
+    if (table) table.appendChild(tbody);
+  }
+}
+
+function bindComparisonSearchEvents() {
+  const form = document.querySelector('.comparison-search-row');
+  const input = document.getElementById('comparison-search-input');
+  const clearBtn = document.getElementById('comparison-clear-btn')
+    || document.querySelector('.comparison-search-row .btn-ghost[type="button"]');
+  if (!form || !input) return;
+
+  if (!form.dataset.boundComparisonSubmit) {
+    form.addEventListener('submit', handleComparisonSearch);
+    form.dataset.boundComparisonSubmit = '1';
+  }
+
+  if (!input.dataset.boundComparisonInput) {
+    input.addEventListener('input', () => {
+      comparisonSearchQuery = normalizeComparisonQuery(input.value);
+      renderProductComparization();
+    });
+    input.dataset.boundComparisonInput = '1';
+  }
+
+  if (clearBtn && !clearBtn.dataset.boundComparisonClear) {
+    clearBtn.addEventListener('click', clearComparisonSearch);
+    clearBtn.dataset.boundComparisonClear = '1';
+  }
+}
+
 function handleComparisonSearch(e) {
   if (e?.preventDefault) e.preventDefault();
   const input = document.getElementById('comparison-search-input');
-  comparisonSearchQuery = String(input?.value || '').trim();
+  comparisonSearchQuery = normalizeComparisonQuery(input?.value || '');
   renderProductComparization();
 }
 
@@ -3306,6 +3387,9 @@ function renderVacancies() {
 }
 
 function renderProductComparization() {
+  ensureComparisonSearchUi();
+  bindComparisonSearchEvents();
+
   const body = document.getElementById('product-comparison-list');
   const totalEl = document.getElementById('cmp-total-products');
   const onlineBetterEl = document.getElementById('cmp-online-better');
@@ -3420,6 +3504,8 @@ function renderProductComparization() {
 
 function initHackathonDashboard() {
   ensureGoogleMapsLoaded();
+  ensureComparisonSearchUi();
+  bindComparisonSearchEvents();
 
   renderPersonalizedMetrics();
   renderBusinessInsights();
