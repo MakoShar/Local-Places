@@ -10,6 +10,29 @@ const PORT = Number(process.env.PORT || 4000);
 const MONGODB_URI = process.env.MONGODB_URI || '';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 
+let dbConnectPromise = null;
+
+async function connectToDatabase() {
+  if (mongoose.connection.readyState === 1) return;
+
+  if (!MONGODB_URI) {
+    throw new Error('MONGODB_URI is missing. Add it in Vercel Project Settings > Environment Variables.');
+  }
+
+  if (!dbConnectPromise) {
+    dbConnectPromise = mongoose.connect(MONGODB_URI)
+      .then(() => {
+        console.log('MongoDB connected');
+      })
+      .catch((error) => {
+        dbConnectPromise = null;
+        throw error;
+      });
+  }
+
+  await dbConnectPromise;
+}
+
 app.use(cors({ origin: ALLOWED_ORIGIN }));
 app.use(express.json({ limit: '1mb' }));
 
@@ -94,6 +117,17 @@ function getPopularityScore(place, stat) {
 }
 
 app.get('/api/health', async (_req, res) => {
+  try {
+    await connectToDatabase();
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      dbConnected: false,
+      service: 'localplaces-backend',
+      error: error.message,
+    });
+  }
+
   const dbState = mongoose.connection.readyState;
   res.json({ ok: true, dbConnected: dbState === 1, service: 'localplaces-backend' });
 });
@@ -286,20 +320,19 @@ app.post('/api/recommendations/rank', async (req, res) => {
 
 async function startServer() {
   try {
-    if (!MONGODB_URI) {
-      throw new Error('MONGODB_URI is missing. Add it to backend/.env');
-    }
-
-    await mongoose.connect(MONGODB_URI);
-    console.log('MongoDB connected');
+    await connectToDatabase();
 
     app.listen(PORT, () => {
       console.log(`Backend running on http://localhost:${PORT}`);
     });
   } catch (error) {
     console.error('Server start failed:', error.message);
-    process.exit(1);
   }
 }
 
-startServer();
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  startServer();
+  module.exports = app;
+}
