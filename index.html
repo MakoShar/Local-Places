@@ -228,6 +228,12 @@
           <h2 id="dash-title">Welcome back</h2>
           <p id="feed-sub">AI recommendations based on your preferences and behavior</p>
         </div>
+        <div class="pts-pill" id="pts-pill" title="Points earned from AI recommendations, video uploads, and interactions">
+          <i class="fas fa-brain"></i>
+          <span id="hdr-points">0</span> pts
+          <span class="ai-points-indicator" id="ai-points-indicator" style="display:none;">
+            <i class="fas fa-sparkles"></i>
+          </span>
         <div class="score-wrap">
           <div class="pts-pill" id="pts-pill"><i class="fas fa-star"></i><span id="hdr-points">0</span> score</div>
           <p class="score-formula">Score = (User Preference x 0.4) + (Distance x 0.2) + (Time Relevance x 0.2) + (Popularity x 0.2)</p>
@@ -254,6 +260,51 @@
               <div class="kpi"><span id="kpi-views">0</span><small>Viewed Products</small></div>
               <div class="kpi"><span id="kpi-purchases">0</span><small>Purchases</small></div>
               <div class="kpi"><span id="kpi-top">None</span><small>Top Category</small></div>
+            </div>
+            <div class="points-breakdown" id="points-breakdown">
+              <h4 class="section-h4">Points Breakdown</h4>
+              <div class="points-stats">
+                <div class="points-stat">
+                  <i class="fas fa-brain"></i>
+                  <div>
+                    <span id="ai-points-total">0</span>
+                    <small>AI Recommendation Points</small>
+                  </div>
+                </div>
+                <div class="points-stat">
+                  <i class="fas fa-video"></i>
+                  <div>
+                    <span id="video-points-total">0</span>
+                    <small>Video Upload Points</small>
+                  </div>
+                </div>
+                <div class="points-stat">
+                  <i class="fas fa-star"></i>
+                  <div>
+                    <span id="total-points">0</span>
+                    <small>Total Points</small>
+                  </div>
+                </div>
+              </div>
+              <div class="ai-status" id="ai-status">
+                <i class="fas fa-cog fa-spin"></i>
+                <span id="ai-status-text">AI scoring active - earning points from personalized recommendations</span>
+              </div>
+              <div class="ai-formula">
+                <div class="formula-title">
+                  <i class="fas fa-calculator"></i>
+                  <span>How AI Points Are Calculated</span>
+                </div>
+                <div class="formula-text">
+                  Score = (User Preferences × 0.4) + (Location Distance × 0.25) + (Time Relevance × 0.2) + (Place Popularity × 0.15)
+                </div>
+                <div class="formula-explanation">
+                  <small>• User Preferences: Based on your selected interests and past behavior</small><br>
+                  <small>• Location Distance: Closer places score higher</small><br>
+                  <small>• Time Relevance: Recent interactions are weighted more</small><br>
+                  <small>• Place Popularity: Google ratings and review counts</small>
+                </div>
+              </div>
             </div>
             <h4 class="section-h4">Recommended Places & Services</h4>
             <div id="personalized-filters" class="filter-row personalized-filters"></div>

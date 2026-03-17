@@ -55,6 +55,30 @@ const localAuthListeners = [];
 let localAuthCurrentUser = null;
 let authBootstrapPromise = null;
 
+// AI Personalization Scoring System
+const BEHAVIOR_TRACKING_KEY = 'localplaces_behavior_tracking';
+const USER_PREFERENCES_KEY = 'localplaces_user_preferences';
+const PLACE_INTERACTIONS_KEY = 'localplaces_place_interactions';
+
+// Behavior weights for scoring algorithm
+const BEHAVIOR_WEIGHTS = {
+  view: 1.0,      // Basic view interaction
+  click: 2.0,     // Clicked on place details
+  favorite: 3.0,  // Added to favorites
+  share: 2.5,     // Shared the place
+  review: 4.0,    // Left a review
+  visit: 5.0      // Actually visited (self-reported)
+};
+
+// Category affinity scoring
+const CATEGORY_AFFINITY_WEIGHTS = {
+  interest_match: 3.0,    // User's selected interests
+  behavior_history: 2.0,  // Past interactions
+  location_proximity: 1.5, // Distance factor
+  rating_popularity: 1.0, // Google rating factor
+  time_relevance: 0.8     // Recency of interactions
+};
+
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
@@ -183,6 +207,339 @@ function hydrateLocalAuthSession() {
   } catch {
     localAuthCurrentUser = null;
   }
+}
+
+// ===== AI PERSONALIZATION SCORING SYSTEM =====
+
+// Track user behavior for AI recommendations
+function trackUserBehavior(action, placeId, category, metadata = {}) {
+  if (!currentUser && !isGuest) return;
+
+  const userId = currentUser?.uid || 'guest';
+  const behaviorKey = `${BEHAVIOR_TRACKING_KEY}_${userId}`;
+
+  let behaviorData = {};
+  try {
+    const raw = localStorage.getItem(behaviorKey);
+    behaviorData = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.warn('Failed to load behavior data:', e);
+  }
+
+  const timestamp = Date.now();
+  const behaviorEntry = {
+    action,
+    placeId,
+    category,
+    timestamp,
+    ...metadata
+  };
+
+  if (!behaviorData[placeId]) {
+    behaviorData[placeId] = { interactions: [] };
+  }
+
+  behaviorData[placeId].interactions.push(behaviorEntry);
+
+  // Keep only last 100 interactions per place to prevent storage bloat
+  if (behaviorData[placeId].interactions.length > 100) {
+    behaviorData[placeId].interactions = behaviorData[placeId].interactions.slice(-100);
+  }
+
+  // Update category preferences
+  if (!behaviorData.categories) behaviorData.categories = {};
+  if (!behaviorData.categories[category]) behaviorData.categories[category] = { count: 0, lastInteraction: 0 };
+
+  behaviorData.categories[category].count += BEHAVIOR_WEIGHTS[action] || 1;
+  behaviorData.categories[category].lastInteraction = timestamp;
+
+  try {
+    localStorage.setItem(behaviorKey, JSON.stringify(behaviorData));
+  } catch (e) {
+    console.warn('Failed to save behavior data:', e);
+  }
+
+  // Update user preferences dynamically
+  updateUserPreferences(userId, behaviorData);
+}
+
+// Calculate personalization score for a place
+function calculatePersonalizationScore(place, userId, category) {
+  if (!place || !userId) return 0;
+
+  const behaviorKey = `${BEHAVIOR_TRACKING_KEY}_${userId}`;
+  let behaviorData = {};
+
+  try {
+    const raw = localStorage.getItem(behaviorKey);
+    behaviorData = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return 0;
+  }
+
+  let score = 0;
+  const placeId = place.place_id || place.id;
+
+  // 1. Interest Match Score (from onboarding)
+  const userInterests = userData?.interests || [];
+  const placeCategories = getPlaceCategories(place);
+  const interestOverlap = userInterests.filter(interest =>
+    placeCategories.some(cat => cat.toLowerCase().includes(interest.toLowerCase()))
+  ).length;
+  score += interestOverlap * CATEGORY_AFFINITY_WEIGHTS.interest_match;
+
+  // 2. Behavior History Score
+  const placeInteractions = behaviorData[placeId]?.interactions || [];
+  const recentInteractions = placeInteractions.filter(interaction =>
+    Date.now() - interaction.timestamp < 30 * 24 * 60 * 60 * 1000 // Last 30 days
+  );
+
+  const behaviorScore = recentInteractions.reduce((sum, interaction) => {
+    const weight = BEHAVIOR_WEIGHTS[interaction.action] || 1;
+    const recencyFactor = Math.max(0.1, 1 - ((Date.now() - interaction.timestamp) / (30 * 24 * 60 * 60 * 1000)));
+    return sum + (weight * recencyFactor);
+  }, 0);
+
+  score += behaviorScore * CATEGORY_AFFINITY_WEIGHTS.behavior_history;
+
+  // 3. Category Affinity Score
+  const categoryData = behaviorData.categories?.[category];
+  if (categoryData) {
+    const categoryScore = Math.min(categoryData.count / 10, 5); // Cap at 5
+    const recencyBonus = Math.max(0, 1 - ((Date.now() - categoryData.lastInteraction) / (7 * 24 * 60 * 60 * 1000)));
+    score += categoryScore * CATEGORY_AFFINITY_WEIGHTS.time_relevance;
+    score += recencyBonus * 0.5;
+  }
+
+  // 4. Location Proximity Score
+  if (userLocation && place.geometry?.location) {
+    const distance = calculateDistance(
+      userLocation.lat, userLocation.lng,
+      place.geometry.location.lat(), place.geometry.location.lng()
+    );
+    const proximityScore = Math.max(0, 1 - (distance / 5000)); // Better score for closer places (within 5km)
+    score += proximityScore * CATEGORY_AFFINITY_WEIGHTS.location_proximity;
+  }
+
+  // 5. Rating & Popularity Score
+  const rating = place.rating || 0;
+  const userRatingsTotal = place.user_ratings_total || 0;
+  const ratingScore = (rating / 5) * (Math.min(userRatingsTotal / 100, 1)); // Popularity factor
+  score += ratingScore * CATEGORY_AFFINITY_WEIGHTS.rating_popularity;
+
+  return Math.max(0, score);
+}
+
+// Calculate distance between two points (Haversine formula)
+function calculateDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c * 1000; // Return in meters
+}
+
+// Get categories for a place
+function getPlaceCategories(place) {
+  const categories = [];
+  if (place.types) {
+    categories.push(...place.types);
+  }
+  if (place.category) {
+    categories.push(place.category);
+  }
+  return [...new Set(categories)];
+}
+
+// Update user preferences based on behavior
+function updateUserPreferences(userId, behaviorData) {
+  const preferencesKey = `${USER_PREFERENCES_KEY}_${userId}`;
+  const preferences = {
+    topCategories: [],
+    favoritePlaceTypes: [],
+    preferredPriceRange: null,
+    lastUpdated: Date.now()
+  };
+
+  // Calculate top categories by interaction count
+  if (behaviorData.categories) {
+    preferences.topCategories = Object.entries(behaviorData.categories)
+      .sort(([,a], [,b]) => b.count - a.count)
+      .slice(0, 5)
+      .map(([category]) => category);
+  }
+
+  // Calculate favorite place types
+  const typeCounts = {};
+  Object.values(behaviorData).forEach(placeData => {
+    if (placeData.interactions) {
+      placeData.interactions.forEach(interaction => {
+        if (interaction.placeTypes) {
+          interaction.placeTypes.forEach(type => {
+            typeCounts[type] = (typeCounts[type] || 0) + 1;
+          });
+        }
+      });
+    }
+  });
+
+  preferences.favoritePlaceTypes = Object.entries(typeCounts)
+    .sort(([,a], [,b]) => b - a)
+    .slice(0, 3)
+    .map(([type]) => type);
+
+  try {
+    localStorage.setItem(preferencesKey, JSON.stringify(preferences));
+  } catch (e) {
+    console.warn('Failed to save user preferences:', e);
+  }
+}
+
+// Enhanced recommendation sorting with AI scoring and point awards
+function sortPlacesByPersonalizationScore(places, category) {
+  if (!currentUser && !isGuest) return places;
+
+  const userId = currentUser?.uid || 'guest';
+
+  // Show AI scoring activity
+  showAIScoringActivity('AI analyzing your preferences and location...');
+
+  return places.map(place => {
+    const personalizationScore = calculatePersonalizationScore(place, userId, category);
+
+    // Award points based on AI personalization score
+    if (personalizationScore > 0 && userData) {
+      const pointsEarned = Math.floor(personalizationScore * 2); // Convert score to points (score * 2)
+      if (pointsEarned > 0) {
+        awardAIPoints(pointsEarned, place.place_id, category);
+      }
+    }
+
+    return {
+      ...place,
+      personalizationScore
+    };
+  }).sort((a, b) => {
+    // Primary sort: personalization score
+    const scoreDiff = b.personalizationScore - a.personalizationScore;
+    if (scoreDiff !== 0) return scoreDiff;
+
+    // Secondary sort: rating
+    const ratingDiff = (b.rating || 0) - (a.rating || 0);
+    if (ratingDiff !== 0) return ratingDiff;
+
+    // Tertiary sort: user ratings total
+    return (b.user_ratings_total || 0) - (a.user_ratings_total || 0);
+  });
+}
+
+// Award points based on AI personalization
+function awardAIPoints(points, placeId, category) {
+  if (!userData || points <= 0) return;
+
+  // Track AI points to avoid duplicate awards
+  const aiPointsKey = `ai_points_${currentUser?.uid || 'guest'}`;
+  let awardedPoints = {};
+  try {
+    const raw = localStorage.getItem(aiPointsKey);
+    awardedPoints = raw ? JSON.parse(raw) : {};
+  } catch (e) {}
+
+  const pointKey = `${placeId}_${category}`;
+  const alreadyAwarded = awardedPoints[pointKey];
+
+  if (!alreadyAwarded) {
+    // Award the points
+    userData.points = (userData.points || 0) + points;
+    awardedPoints[pointKey] = {
+      points,
+      timestamp: Date.now(),
+      placeId,
+      category
+    };
+
+    // Keep only recent awards (last 24 hours) to prevent storage bloat
+    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    Object.keys(awardedPoints).forEach(key => {
+      if (awardedPoints[key].timestamp < oneDayAgo) {
+        delete awardedPoints[key];
+      }
+    });
+
+    try {
+      localStorage.setItem(aiPointsKey, JSON.stringify(awardedPoints));
+    } catch (e) {
+      console.warn('Failed to save AI points:', e);
+    }
+
+    // Update the header points display
+    updateHeaderPoints();
+
+    // Show AI points indicator
+    showAIPointsIndicator();
+
+    // Show subtle notification for AI points earned
+    if (points > 0) {
+      showToast(`+${points} AI points earned!`, 'success', 2000);
+    }
+  }
+}
+
+// Award video upload points
+function awardVideoPoints(points, videoId) {
+  if (!userData || points <= 0) return;
+
+  const userId = currentUser?.uid || 'guest';
+  const videoPointsKey = `video_points_${userId}`;
+  let awardedPoints = {};
+  try {
+    const raw = localStorage.getItem(videoPointsKey);
+    awardedPoints = raw ? JSON.parse(raw) : {};
+  } catch (e) {}
+
+  const alreadyAwarded = awardedPoints[videoId];
+
+  if (!alreadyAwarded) {
+    // Award the points
+    userData.points = (userData.points || 0) + points;
+    awardedPoints[videoId] = {
+      points,
+      timestamp: Date.now(),
+      videoId
+    };
+
+    try {
+      localStorage.setItem(videoPointsKey, JSON.stringify(awardedPoints));
+    } catch (e) {
+      console.warn('Failed to save video points:', e);
+    }
+
+    // Update the header points display
+    updateHeaderPoints();
+  }
+}
+
+// Get personalized recommendations for new users
+function getPersonalizedRecommendationsForNewUser(category, maxResults = 10) {
+  const userInterests = userData?.interests || [];
+  const center = userLocation || { lat: 22.7196, lng: 75.8577 };
+
+  // For new users, recommend based on interests and location
+  // This is a simplified version - in a real AI system, this would use collaborative filtering
+  return searchNearbyByCategory(category, center, { radius: 5000, openNow: true })
+    .then(places => {
+      // Filter and score based on interests
+      return places.filter(place => {
+        const placeCategories = getPlaceCategories(place);
+        return userInterests.some(interest =>
+          placeCategories.some(cat => cat.toLowerCase().includes(interest.toLowerCase()))
+        );
+      }).slice(0, maxResults);
+    })
+    .catch(() => []);
 }
 
 const auth = {
@@ -2019,20 +2376,63 @@ function renderPersonalizedMetrics() {
   const top = Object.entries(analytics.categoryCounts)
     .sort((a, b) => b[1] - a[1])[0]?.[0];
   kpiTop.textContent = top || 'None';
+
+  // Update points breakdown and AI status
+  updatePointsBreakdown();
 }
 
 function rankProductsByQuery(query) {
   const q = String(query || '').toLowerCase();
+  const userId = currentUser?.uid || 'guest';
+
   const scored = PRODUCT_CATALOG.map(item => {
     let score = 0;
+
+    // Basic keyword matching
     if (q.includes(item.category)) score += 3;
     if (q.includes(item.name.toLowerCase().split(' ')[0])) score += 2;
     if (item.name.toLowerCase().includes(q)) score += 4;
     if (q.includes('party') && item.category === 'art') score += 2;
     if (q.includes('restaurant') && item.category === 'food') score += 2;
     if (q.includes('cafe') && (item.category === 'food' || item.category === 'music')) score += 2;
+
+    // AI Personalization: Add behavior-based scoring
+    const behaviorKey = `${BEHAVIOR_TRACKING_KEY}_${userId}`;
+    let behaviorData = {};
+    try {
+      const raw = localStorage.getItem(behaviorKey);
+      behaviorData = raw ? JSON.parse(raw) : {};
+    } catch (e) {}
+
+    // Category preference scoring
+    const categoryData = behaviorData.categories?.[item.category];
+    if (categoryData) {
+      const categoryScore = Math.min(categoryData.count / 5, 3); // Max 3 points for category preference
+      const recencyFactor = Math.max(0.1, 1 - ((Date.now() - categoryData.lastInteraction) / (14 * 24 * 60 * 60 * 1000))); // 14 days
+      score += categoryScore * recencyFactor;
+    }
+
+    // Interest matching (from onboarding)
+    const userInterests = userData?.interests || [];
+    if (userInterests.includes(item.category)) {
+      score += 2.5; // Interest match bonus
+    }
+
+    // Previous interaction bonus
+    const itemInteractions = behaviorData[item.id]?.interactions || [];
+    const recentInteractions = itemInteractions.filter(interaction =>
+      Date.now() - interaction.timestamp < 30 * 24 * 60 * 60 * 1000 // Last 30 days
+    );
+    if (recentInteractions.length > 0) {
+      const interactionScore = recentInteractions.reduce((sum, interaction) => {
+        return sum + (BEHAVIOR_WEIGHTS[interaction.action] || 1);
+      }, 0);
+      score += Math.min(interactionScore / 10, 2); // Max 2 points for past interactions
+    }
+
     return { ...item, score };
   });
+
   return scored.sort((a, b) => b.score - a.score).slice(0, 6);
 }
 
@@ -2314,7 +2714,10 @@ async function loadNearbyPlacesByCategory(category) {
 
     results.forEach(place => nearbyPlaceCache.set(place.place_id, place));
     loading.classList.add('hidden');
-    const selectedIds = renderNearbyPlaces(results, category);
+
+    // Apply AI personalization scoring and sorting
+    const personalizedResults = sortPlacesByPersonalizationScore(results, category);
+    const selectedIds = renderNearbyPlaces(personalizedResults, category);
     await loadOtherOpenPlaces(category, selectedIds);
   } catch (e) {
     console.warn('Nearby search failed', e);
@@ -2361,6 +2764,15 @@ function renderNearbyPlaces(places, category) {
     recommendationContextCache.set(place.place_id, item);
     const card = document.createElement('div');
     card.className = 'feed-card';
+    card.onclick = () => {
+      // Track place view when card is clicked
+      trackUserBehavior('view', place.place_id, category, {
+        placeName: place.name,
+        placeTypes: place.types,
+        rating: place.rating,
+        personalizationScore: place.personalizationScore || 0
+      });
+    };
     card.innerHTML = `
       <img class="feed-card-img" src="${getPhotoUrl(place)}" alt="${place.name}" loading="lazy" />
       <div class="feed-card-body">
@@ -2376,10 +2788,12 @@ function renderNearbyPlaces(places, category) {
           ${tags.map(tag => `<span class="tag-pill">${tag}</span>`).join('')}
         </div>
         <div class="product-actions" style="margin-top:8px;">
-          <button class="btn-mini" onclick="openNearbyPlaceDashboard('${place.place_id}','${category}')">Open Dashboard</button>
+          <button class="btn-mini" onclick="openNearbyPlaceDashboard('${place.place_id}','${category}'); trackUserBehavior('click', '${place.place_id}', '${category}', {action: 'dashboard_open', placeName: '${place.name.replace(/'/g, "\\'")}'})">Open Dashboard</button>
         </div>
       </div>`;
     grid.appendChild(card);
+
+    // No longer showing separate AI score indicator - converted to points system
   });
 
   trackBusinessRecommendationImpressions(topRecommendations);
@@ -2560,7 +2974,10 @@ function submitRealityFeed(e) {
   writeJsonArray(REALITY_FEED_KEY, feed);
   e.target.reset();
   renderRealityFeed();
-  showToast('Video experience added.', 'success');
+
+  // Award video points
+  awardVideoPoints(10, `reality_feed_${Date.now()}`);
+  showToast('Video experience added. +10 points earned!', 'success');
 }
 
 function renderRealityFeed() {
@@ -2709,6 +3126,105 @@ function switchPage(page, btn) {
 function updateHeaderPoints() {
   const pts = userData?.points || 0;
   document.getElementById('hdr-points').textContent = pts.toLocaleString();
+  updatePointsBreakdown();
+}
+
+// Show AI points indicator animation
+function showAIPointsIndicator() {
+  const indicator = document.getElementById('ai-points-indicator');
+  if (indicator) {
+    indicator.style.display = 'inline-flex';
+    setTimeout(() => {
+      indicator.style.display = 'none';
+    }, 3000); // Hide after 3 seconds
+  }
+}
+
+// Update points breakdown display
+function updatePointsBreakdown() {
+  const userId = currentUser?.uid || 'guest';
+  const aiPointsKey = `ai_points_${userId}`;
+  const videoPointsKey = `video_points_${userId}`;
+
+  let aiPointsTotal = 0;
+  let videoPointsTotal = 0;
+
+  try {
+    // Calculate AI points
+    const aiPointsRaw = localStorage.getItem(aiPointsKey);
+    if (aiPointsRaw) {
+      const aiPointsData = JSON.parse(aiPointsRaw);
+      aiPointsTotal = Object.values(aiPointsData).reduce((sum, point) => sum + (point.points || 0), 0);
+    }
+
+    // Calculate video points
+    const videoPointsRaw = localStorage.getItem(videoPointsKey);
+    if (videoPointsRaw) {
+      const videoPointsData = JSON.parse(videoPointsRaw);
+      videoPointsTotal = Object.values(videoPointsData).reduce((sum, point) => sum + (point.points || 0), 0);
+    }
+
+  } catch (e) {
+    console.warn('Error calculating points breakdown:', e);
+  }
+
+  // Update display
+  const aiPointsEl = document.getElementById('ai-points-total');
+  const videoPointsEl = document.getElementById('video-points-total');
+  const totalPointsEl = document.getElementById('total-points');
+
+  if (aiPointsEl) aiPointsEl.textContent = aiPointsTotal.toLocaleString();
+  if (videoPointsEl) videoPointsEl.textContent = videoPointsTotal.toLocaleString();
+  if (totalPointsEl) totalPointsEl.textContent = (userData?.points || 0).toLocaleString();
+
+  // Update AI status
+  updateAIStatus(aiPointsTotal > 0);
+}
+
+// Update AI status indicator
+function updateAIStatus(hasAIPoints = false) {
+  const statusEl = document.getElementById('ai-status');
+  const statusTextEl = document.getElementById('ai-status-text');
+
+  if (!statusEl || !statusTextEl) return;
+
+  // Check if user has AI points
+  const userId = currentUser?.uid || 'guest';
+  const aiPointsKey = `ai_points_${userId}`;
+  let actualHasAIPoints = false;
+
+  try {
+    const aiPointsRaw = localStorage.getItem(aiPointsKey);
+    if (aiPointsRaw) {
+      const aiPointsData = JSON.parse(aiPointsRaw);
+      const totalAIPoints = Object.values(aiPointsData).reduce((sum, point) => sum + (point.points || 0), 0);
+      actualHasAIPoints = totalAIPoints > 0;
+    }
+  } catch (e) {}
+
+  if (actualHasAIPoints || hasAIPoints) {
+    statusTextEl.textContent = 'AI scoring active - earning points from personalized recommendations';
+    statusEl.classList.remove('calculating');
+  } else {
+    statusTextEl.textContent = 'AI scoring initializing - start browsing to earn points!';
+    statusEl.classList.add('calculating');
+  }
+}
+
+// Show AI scoring activity
+function showAIScoringActivity(message = 'Calculating personalized scores...') {
+  const statusEl = document.getElementById('ai-status');
+  const statusTextEl = document.getElementById('ai-status-text');
+
+  if (statusEl && statusTextEl) {
+    statusTextEl.textContent = message;
+    statusEl.classList.add('calculating');
+
+    // Reset to normal after 3 seconds
+    setTimeout(() => {
+      updateAIStatus();
+    }, 3000);
+  }
 }
 
 /* ------------------------------------------------------------------

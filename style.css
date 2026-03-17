@@ -350,6 +350,14 @@ img { display: block; max-width: 100%; }
 }
 .pts-pill i { font-size: 11px; }
 
+.ai-points-indicator {
+  color: var(--accent);
+  animation: sparkle 1s ease-in-out;
+}
+
+@keyframes sparkle {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.8; }
 .score-wrap {
   display: flex;
   flex-direction: column;
@@ -923,6 +931,148 @@ img { display: block; max-width: 100%; }
   grid-template-columns: 1fr auto;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+/* ---------- AI PERSONALIZATION SCORE INDICATOR ---------- */
+.ai-score-indicator {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: var(--r-full);
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 8px var(--accent-glow);
+  z-index: 2;
+}
+
+.ai-score-indicator i {
+  font-size: 8px;
+}
+
+/* ---------- POINTS BREAKDOWN ---------- */
+.points-breakdown {
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--bg-card);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+}
+
+.points-stats {
+  display: flex;
+  gap: 16px;
+  justify-content: space-around;
+}
+
+.points-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.points-stat i {
+  font-size: 20px;
+  color: var(--accent);
+}
+
+.points-stat div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.points-stat span {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-1);
+}
+
+.points-stat small {
+  font-size: 10px;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+/* ---------- AI STATUS INDICATOR ---------- */
+.ai-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: rgba(124, 58, 237, 0.1);
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  border-radius: var(--r-md);
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.ai-status i {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.ai-status.calculating {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.ai-formula {
+  margin-top: 15px;
+  padding: 15px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.formula-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4CAF50;
+  margin-bottom: 10px;
+}
+
+.formula-title i {
+  color: #4CAF50;
+}
+
+.formula-text {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.formula-explanation {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.4;
+}
+
+.formula-explanation small {
+  display: block;
+  margin-bottom: 3px;
 }
 
 .inline-form input,
