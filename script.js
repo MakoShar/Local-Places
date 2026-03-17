@@ -1,3 +1,4 @@
+
 /* ================================================================
    LocalPlaces — script.js
    Local auth, local storage recommendation engine, UI logic
@@ -689,6 +690,18 @@ const REALITY_FEED_KEY = 'localplaces_reality_feed';
 const CUSTOM_WORK_KEY = 'localplaces_custom_work';
 const VACANCIES_KEY = 'localplaces_vacancies';
 const PERSONAL_FILTER_KEY_PREFIX = 'localplaces_personal_filter_';
+const BUSINESS_INSIGHTS_KEY = 'localplaces_business_insights';
+
+const SCORE_WEIGHTS = {
+  preference: 0.4,
+  distance: 0.2,
+  time: 0.2,
+  popularity: 0.2,
+};
+
+const DISTANCE_FILTERS_KM = [3, 5, 10, 20];
+let selectedDistanceFilterKm = 10;
+const recommendationContextCache = new Map();
 
 const CATEGORY_SEARCH_CONFIG = {
   food: { label: 'Food / Pizza', emoji: '🍕', keyword: 'pizza restaurant', type: 'restaurant' },
@@ -856,6 +869,188 @@ function fmtDist(km) {
   return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
 }
 
+function getCurrentHour() {
+  return new Date().getHours();
+}
+
+function getTimeBucket(hour = getCurrentHour()) {
+  if (hour >= 5 && hour < 11) return 'Morning';
+  if (hour >= 11 && hour < 16) return 'Afternoon';
+  if (hour >= 16 && hour < 21) return 'Evening';
+  return 'Night';
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function readBusinessInsightsStore() {
+  try {
+    const raw = localStorage.getItem(BUSINESS_INSIGHTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || parsed.date !== todayKey()) {
+      return { date: todayKey(), shops: {}, hourlyTotals: {} };
+    }
+    return {
+      date: parsed.date,
+      shops: parsed.shops || {},
+      hourlyTotals: parsed.hourlyTotals || {}
+    };
+  } catch {
+    return { date: todayKey(), shops: {}, hourlyTotals: {} };
+  }
+}
+
+function saveBusinessInsightsStore(store) {
+  localStorage.setItem(BUSINESS_INSIGHTS_KEY, JSON.stringify(store));
+}
+
+function getCategoryAffinityScore(category) {
+  const analytics = getAnalytics();
+  const categoryCounts = analytics.categoryCounts || {};
+  const maxCount = Math.max(1, ...Object.values(categoryCounts), 1);
+  const behaviorScore = Math.min(1, (categoryCounts[category] || 0) / maxCount);
+
+  const isInterestMatch = (userData?.interests || []).includes(category);
+  const interestBoost = isInterestMatch ? 1 : 0;
+
+  return Math.min(1, behaviorScore * 0.7 + interestBoost * 0.3);
+}
+
+function getDistanceScore(distanceKm, maxDistanceKm = selectedDistanceFilterKm) {
+  if (distanceKm === null || distanceKm === undefined || !Number.isFinite(distanceKm)) return 0.3;
+  const clamped = Math.min(distanceKm, maxDistanceKm);
+  return Math.max(0, 1 - clamped / Math.max(maxDistanceKm, 0.1));
+}
+
+function getTimeRelevanceScore(category, hour = getCurrentHour()) {
+  const bucket = getTimeBucket(hour);
+  const preferred = {
+    food: ['Afternoon', 'Evening', 'Night'],
+    shopping: ['Afternoon', 'Evening'],
+    fitness: ['Morning', 'Evening'],
+    football: ['Evening', 'Night'],
+    cricket: ['Morning', 'Evening'],
+    walking: ['Morning', 'Evening'],
+    nature: ['Morning', 'Afternoon'],
+    history: ['Morning', 'Afternoon'],
+    art: ['Afternoon', 'Evening'],
+    music: ['Evening', 'Night'],
+  };
+  const windows = preferred[category] || ['Afternoon', 'Evening'];
+  return windows.includes(bucket) ? 1 : 0.45;
+}
+
+function getPopularityScore(place) {
+  const rating = Number(place?.rating || 0);
+  const ratingScore = Math.min(1, rating / 5);
+  const reviews = Number(place?.user_ratings_total || place?.reviewCount || 0);
+  const reviewScore = Math.min(1, Math.log10(reviews + 1) / 4);
+  return ratingScore * 0.65 + reviewScore * 0.35;
+}
+
+function buildRecommendationExplanation(components, category, distanceKm) {
+  const reasons = [];
+  if (components.preference >= 0.6) reasons.push(`you often interact with ${CATEGORY_SEARCH_CONFIG[category]?.label || category}`);
+  if (distanceKm !== null && distanceKm <= 2.5) reasons.push('it is nearby');
+  if (components.time >= 0.8) reasons.push(`it matches ${getTimeBucket().toLowerCase()} demand`);
+  if (components.popularity >= 0.7) reasons.push('it is trending now');
+
+  if (!reasons.length && distanceKm !== null) reasons.push('it is close to your selected area');
+  if (!reasons.length) reasons.push('it matches your current preferences');
+
+  return `Recommended because ${reasons.join(' + ')}`;
+}
+
+function computeWeightedRecommendation(place, category, center, maxDistanceKm = selectedDistanceFilterKm) {
+  const distanceKm = center?.lat && center?.lng && place?.geometry?.location
+    ? haversineKm(center.lat, center.lng, place.geometry.location.lat(), place.geometry.location.lng())
+    : null;
+
+  const components = {
+    preference: getCategoryAffinityScore(category),
+    distance: getDistanceScore(distanceKm, maxDistanceKm),
+    time: getTimeRelevanceScore(category),
+    popularity: getPopularityScore(place),
+  };
+
+  const finalScore =
+    components.preference * SCORE_WEIGHTS.preference +
+    components.distance * SCORE_WEIGHTS.distance +
+    components.time * SCORE_WEIGHTS.time +
+    components.popularity * SCORE_WEIGHTS.popularity;
+
+  return {
+    finalScore,
+    components,
+    distanceKm,
+    explanation: buildRecommendationExplanation(components, category, distanceKm),
+  };
+}
+
+function trackBusinessRecommendationImpressions(recommendations) {
+  if (!Array.isArray(recommendations) || !recommendations.length) return;
+  const store = readBusinessInsightsStore();
+  const hour = String(getCurrentHour());
+  store.hourlyTotals[hour] = (store.hourlyTotals[hour] || 0) + recommendations.length;
+
+  recommendations.forEach(item => {
+    const placeId = item?.place?.place_id;
+    if (!placeId) return;
+    if (!store.shops[placeId]) {
+      store.shops[placeId] = {
+        name: item.place.name || 'Unknown Shop',
+        appearances: 0,
+        hourly: {}
+      };
+    }
+    store.shops[placeId].appearances += 1;
+    store.shops[placeId].hourly[hour] = (store.shops[placeId].hourly[hour] || 0) + 1;
+  });
+
+  saveBusinessInsightsStore(store);
+  renderBusinessInsights();
+}
+
+function renderBusinessInsights() {
+  const appearEl = document.getElementById('biz-appear-count');
+  const peakEl = document.getElementById('biz-peak-traffic');
+  const topShopEl = document.getElementById('biz-top-shop');
+  if (!appearEl || !peakEl || !topShopEl) return;
+
+  const store = readBusinessInsightsStore();
+  const topShopEntry = Object.entries(store.shops || {})
+    .sort((a, b) => (b[1]?.appearances || 0) - (a[1]?.appearances || 0))[0];
+
+  const topShop = topShopEntry?.[1] || null;
+  appearEl.textContent = String(topShop?.appearances || 0);
+  topShopEl.textContent = topShop?.name || 'No data yet';
+
+  const peakHour = Object.entries(store.hourlyTotals || {})
+    .sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0];
+  peakEl.textContent = peakHour !== undefined ? getTimeBucket(Number(peakHour)) : '-';
+}
+
+function renderDistanceFilterControls() {
+  const root = document.getElementById('distance-filter-controls');
+  if (!root) return;
+
+  root.innerHTML = '';
+  DISTANCE_FILTERS_KM.forEach(km => {
+    const btn = document.createElement('button');
+    btn.className = `fchip ${selectedDistanceFilterKm === km ? 'active-chip' : ''}`;
+    btn.type = 'button';
+    btn.textContent = `${km} km`;
+    btn.onclick = () => {
+      selectedDistanceFilterKm = km;
+      renderDistanceFilterControls();
+      const savedCategory = localStorage.getItem(personalFilterKey()) || getPreferredCategories()[0] || 'food';
+      loadNearbyPlacesByCategory(savedCategory);
+    };
+    root.appendChild(btn);
+  });
+}
+
 /** Show toast notification */
 function showToast(msg, type = 'success', duration = 3000) {
   const toast = document.getElementById('toast');
@@ -1012,6 +1207,8 @@ function openSettingsModal() {
 
   document.getElementById('settings-name').value = currentUser?.displayName || userData?.displayName || '';
   document.getElementById('settings-email').value = currentUser?.email || userData?.email || '';
+  document.getElementById('settings-lat').value = Number.isFinite(userData?.location?.lat) ? userData.location.lat : '';
+  document.getElementById('settings-lng').value = Number.isFinite(userData?.location?.lng) ? userData.location.lng : '';
   modal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
 }
@@ -1024,14 +1221,56 @@ function closeSettingsModal(e) {
   document.body.style.overflow = '';
 }
 
+function detectSettingsLocation() {
+  const latEl = document.getElementById('settings-lat');
+  const lngEl = document.getElementById('settings-lng');
+  if (!latEl || !lngEl) return;
+
+  if (!navigator.geolocation) {
+    showToast('Geolocation not available on this device.', 'error');
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      latEl.value = pos.coords.latitude.toFixed(6);
+      lngEl.value = pos.coords.longitude.toFixed(6);
+      showToast('Current location added.', 'success');
+    },
+    () => {
+      showToast('Could not fetch current location. Enter coordinates manually.', 'error');
+    }
+  );
+}
+
 function saveProfileSettings(e) {
   e.preventDefault();
   const nextName = document.getElementById('settings-name').value.trim();
   const nextEmail = document.getElementById('settings-email').value.trim().toLowerCase();
+  const latInput = document.getElementById('settings-lat').value.trim();
+  const lngInput = document.getElementById('settings-lng').value.trim();
 
   if (!nextName || !nextEmail) {
     showToast('Name and email are required.', 'error');
     return;
+  }
+
+  const hasLat = latInput.length > 0;
+  const hasLng = lngInput.length > 0;
+  if (hasLat !== hasLng) {
+    showToast('Enter both latitude and longitude.', 'error');
+    return;
+  }
+
+  let nextLocation = userData?.location || null;
+  if (hasLat && hasLng) {
+    const lat = Number(latInput);
+    const lng = Number(lngInput);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      showToast('Latitude must be -90 to 90 and longitude -180 to 180.', 'error');
+      return;
+    }
+    nextLocation = { lat, lng };
   }
 
   const users = readAuthUsers();
@@ -1050,13 +1289,23 @@ function saveProfileSettings(e) {
   if (userData) {
     userData.displayName = nextName;
     userData.email = nextEmail;
+    userData.location = nextLocation;
     if (currentUser?.uid) saveLocalUserData(currentUser.uid, userData);
+  }
+
+  userLocation = nextLocation;
+  if (currentUser?.uid) {
+    setOneTimePersonalizationForCurrentUser(userData?.interests || [], nextLocation);
   }
 
   trackLoginInfo(currentUser);
   updateSidebarProfile();
   closeSettingsModal();
   showToast('Profile settings updated.', 'success');
+
+  if (!document.getElementById('app-view')?.classList.contains('hidden')) {
+    loadFeed();
+  }
 }
 
 function setOneTimePersonalizationForCurrentUser(interests, location) {
@@ -1569,13 +1818,19 @@ async function saveOnboarding() {
  * Higher interest score × closer distance = higher rank
  */
 function computeScore(place, tagScores, uLat, uLng) {
-  let tagSum = 0;
-  (place.tags || []).forEach(t => { tagSum += (tagScores[t] || 0); });
-  if (uLat && uLng) {
-    const dist = haversineKm(uLat, uLng, place.location.lat, place.location.lng);
-    return tagSum / Math.max(dist, 0.05);
-  }
-  return tagSum;
+  const prefRaw = (place.tags || []).reduce((sum, t) => sum + (tagScores[t] || 0), 0);
+  const prefNorm = Math.min(1, prefRaw / 10);
+  const distKm = (uLat && uLng) ? haversineKm(uLat, uLng, place.location.lat, place.location.lng) : null;
+  const distanceNorm = getDistanceScore(distKm, selectedDistanceFilterKm);
+  const timeNorm = getTimeRelevanceScore((place.tags || [])[0] || 'food');
+  const popularityNorm = getPopularityScore(place);
+
+  return (
+    prefNorm * SCORE_WEIGHTS.preference +
+    distanceNorm * SCORE_WEIGHTS.distance +
+    timeNorm * SCORE_WEIGHTS.time +
+    popularityNorm * SCORE_WEIGHTS.popularity
+  );
 }
 
 async function loadFeed() {
@@ -2436,7 +2691,9 @@ async function loadNearbyPlacesByCategory(category) {
   }
 
   const cfg = CATEGORY_SEARCH_CONFIG[category] || CATEGORY_SEARCH_CONFIG.food;
-  if (hint) hint.textContent = `Showing nearby ${cfg.label} places from Google Maps (open and closed).`;
+  if (hint) {
+    hint.textContent = `Showing ${cfg.label} for ${getTimeBucket().toLowerCase()} intent within ${selectedDistanceFilterKm} km.`;
+  }
 
   if (!window.google || !google.maps || !google.maps.places || window._mapsError) {
     loading.classList.add('hidden');
@@ -2481,19 +2738,30 @@ function renderNearbyPlaces(places, category) {
   const empty = document.getElementById('feed-empty');
   if (!grid || !empty) return;
 
-  const topPlaces = (places || []).slice(0, 18);
-  if (!topPlaces.length) {
+  const center = userData?.location || { lat: 22.7196, lng: 75.8577 };
+  const withScores = (places || []).map(place => {
+    const score = computeWeightedRecommendation(place, category, center, selectedDistanceFilterKm);
+    return { place, ...score };
+  }).filter(item => item.distanceKm === null || item.distanceKm <= selectedDistanceFilterKm);
+
+  withScores.sort((a, b) => b.finalScore - a.finalScore);
+  const topRecommendations = withScores.slice(0, 18);
+
+  if (!topRecommendations.length) {
     empty.classList.remove('hidden');
-    empty.querySelector('p').textContent = 'No nearby places found for this filter.';
+    empty.querySelector('p').textContent = `No places found within ${selectedDistanceFilterKm} km. Try a larger distance.`;
     return [];
   }
 
   empty.classList.add('hidden');
   grid.innerHTML = '';
-  topPlaces.forEach(place => {
+  recommendationContextCache.clear();
+  topRecommendations.forEach(item => {
+    const place = item.place;
     const openNow = place.opening_hours?.open_now;
     const statusText = openNow === true ? 'Open now' : openNow === false ? 'Closed now' : 'Status unknown';
     const tags = getPlaceTagsForCard(place, category);
+    recommendationContextCache.set(place.place_id, item);
     const card = document.createElement('div');
     card.className = 'feed-card';
     card.onclick = () => {
@@ -2510,8 +2778,10 @@ function renderNearbyPlaces(places, category) {
       <div class="feed-card-body">
         <div class="feed-card-name">${place.name}</div>
         <div class="feed-card-desc">${place.vicinity || 'Nearby place'}</div>
+        <div class="panel-sub">${item.explanation}</div>
         <div class="feed-card-meta">
           <span class="feed-rating"><i class="fas fa-star"></i> ${(place.rating || 0).toFixed(1)}</span>
+          <span class="feed-distance"><i class="fas fa-location-dot"></i> ${item.distanceKm !== null ? fmtDist(item.distanceKm) : 'Nearby'}</span>
           <span class="feed-distance"><i class="fas fa-store"></i> ${statusText}</span>
         </div>
         <div class="feed-tags">
@@ -2526,7 +2796,8 @@ function renderNearbyPlaces(places, category) {
     // No longer showing separate AI score indicator - converted to points system
   });
 
-  return topPlaces.map(place => place.place_id);
+  trackBusinessRecommendationImpressions(topRecommendations);
+  return topRecommendations.map(item => item.place.place_id);
 }
 
 async function loadOtherOpenPlaces(selectedCategory, selectedPlaceIds = []) {
@@ -2611,6 +2882,7 @@ function renderOtherOpenPlaces(places) {
 async function openNearbyPlaceDashboard(placeId, category) {
   const base = nearbyPlaceCache.get(placeId);
   if (!base) return;
+  const context = recommendationContextCache.get(placeId);
 
   let detail = base;
   try {
@@ -2633,9 +2905,10 @@ async function openNearbyPlaceDashboard(placeId, category) {
     <img class="modal-place-img" src="${getPhotoUrl(detail)}" alt="${detail.name}" />
     <h2 class="modal-place-name">${detail.name}</h2>
     <p class="modal-place-addr"><i class="fas fa-location-dot"></i>${detail.formatted_address || base.vicinity || 'Nearby area'}</p>
-    <p class="modal-place-desc">Top match for your <strong>${category}</strong> preference. Live listing powered by Google Maps nearby search.</p>
+    <p class="modal-place-desc">${context?.explanation || `Top match for your ${category} preference.`}</p>
     <div class="modal-meta-row">
       <span class="modal-badge badge-rating"><i class="fas fa-star"></i> ${(detail.rating || 0).toFixed(1)} / 5</span>
+      ${context?.distanceKm !== null && context?.distanceKm !== undefined ? `<span class="modal-badge badge-dist"><i class="fas fa-person-walking"></i> ${fmtDist(context.distanceKm)} away</span>` : ''}
       <span class="modal-badge badge-reviews"><i class="fas fa-phone"></i> ${detail.formatted_phone_number || 'Contact unavailable'}</span>
     </div>
     <div class="product-actions" style="margin-top:12px;">
@@ -2803,6 +3076,8 @@ function renderVacancies() {
 
 function initHackathonDashboard() {
   renderPersonalizedMetrics();
+  renderBusinessInsights();
+  renderDistanceFilterControls();
   renderChatResults(PRODUCT_CATALOG.slice(0, 4));
   renderPersonalizedFilters();
   const saved = localStorage.getItem(personalFilterKey()) || getPreferredCategories()[0] || 'food';

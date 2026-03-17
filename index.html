@@ -234,6 +234,9 @@
           <span class="ai-points-indicator" id="ai-points-indicator" style="display:none;">
             <i class="fas fa-sparkles"></i>
           </span>
+        <div class="score-wrap">
+          <div class="pts-pill" id="pts-pill"><i class="fas fa-star"></i><span id="hdr-points">0</span> score</div>
+          <p class="score-formula">Score = (User Preference x 0.4) + (Distance x 0.2) + (Time Relevance x 0.2) + (Popularity x 0.2)</p>
         </div>
       </header>
 
@@ -251,6 +254,7 @@
 
           <article class="panel-card">
             <h3>Personalized Dashboard</h3>
+            <p class="panel-sub">Recommended because you visited cafes + it's nearby + trending now</p>
             <p class="panel-sub">Learns from viewed products and purchase history saved locally.</p>
             <div class="kpi-row hidden" id="personalized-summary">
               <div class="kpi"><span id="kpi-views">0</span><small>Viewed Products</small></div>
@@ -304,7 +308,13 @@
             </div>
             <h4 class="section-h4">Recommended Places & Services</h4>
             <div id="personalized-filters" class="filter-row personalized-filters"></div>
+            <div id="distance-filter-controls" class="filter-row personalized-filters"></div>
             <p id="personalized-hint" class="panel-sub">Tap a filter to discover nearby open places using Google Maps data.</p>
+            <div class="kpi-row" id="business-insights-row">
+              <div class="kpi"><span id="biz-appear-count">0</span><small>Your shop appeared in recommendations today</small></div>
+              <div class="kpi"><span id="biz-peak-traffic">-</span><small>Peak traffic</small></div>
+              <div class="kpi"><span id="biz-top-shop">-</span><small>Most shown shop</small></div>
+            </div>
             <div id="feed-grid" class="masonry-grid"></div>
             <div id="feed-loading" class="state-msg"><div class="spinner"></div><p>Loading your personalized dashboard…</p></div>
             <div id="feed-empty" class="state-msg hidden"><i class="fas fa-map-signs state-icon"></i><p>No recommendations yet.</p></div>
@@ -391,6 +401,19 @@
     <form id="settings-form" class="stack-form" onsubmit="saveProfileSettings(event)">
       <input id="settings-name" type="text" placeholder="Your name" required />
       <input id="settings-email" type="email" placeholder="Your email" required />
+      <div class="manual-location-grid">
+        <div class="field-wrap">
+          <i class="fas fa-map-pin field-icon"></i>
+          <input type="number" id="settings-lat" placeholder="Latitude" step="any" />
+        </div>
+        <div class="field-wrap">
+          <i class="fas fa-map-pin field-icon"></i>
+          <input type="number" id="settings-lng" placeholder="Longitude" step="any" />
+        </div>
+      </div>
+      <button type="button" class="btn-ghost full-w" onclick="detectSettingsLocation()">
+        <i class="fas fa-crosshairs"></i> Use Current Location
+      </button>
       <button class="btn-primary" type="submit">Save Settings</button>
     </form>
   </div>
