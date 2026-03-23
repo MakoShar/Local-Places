@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LocalPlaces | Onboarding</title>
+  <meta name="description" content="Set your interests and location to personalize LocalPlaces." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body data-page="onboarding">
+
+<!-- ===================== LOADING SCREEN ===================== -->
+<div id="loading-screen">
+  <div class="loader-content">
+    <div class="loader-icon-ring">
+      <i class="fas fa-map-marker-alt loader-icon"></i>
+    </div>
+    <h1 class="loader-title">LocalPlaces</h1>
+    <p class="loader-sub">Discovering your world…</p>
+    <div class="loader-track"><div class="loader-fill"></div></div>
+  </div>
+</div>
+
+<!-- ===================== ONBOARDING VIEW ===================== -->
+<div id="onboarding-view" class="view hidden">
+  <div class="ob-wrap">
+
+    <!-- Step 1: Interests -->
+    <div id="ob-step1" class="ob-step">
+      <div class="ob-top">
+        <div class="ob-progress"><div class="ob-prog-fill" style="width:50%"></div></div>
+        <span class="ob-step-label">Step 1 of 2</span>
+      </div>
+      <div class="ob-body">
+        <h2>What are you into?</h2>
+        <p class="ob-desc">Pick at least 3 interests — we'll personalise your feed</p>
+        <div class="interests-grid" id="interests-grid">
+          <!-- Filled by JS -->
+        </div>
+      </div>
+      <div class="ob-actions">
+        <span id="selected-count" class="sel-count">0 selected</span>
+        <button class="btn-primary" onclick="goToStep2()" id="next-step-btn" disabled>
+          Next <i class="fas fa-arrow-right"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 2: Location -->
+    <div id="ob-step2" class="ob-step hidden">
+      <div class="ob-top">
+        <div class="ob-progress"><div class="ob-prog-fill" style="width:100%"></div></div>
+        <span class="ob-step-label">Step 2 of 2</span>
+      </div>
+      <div class="ob-body">
+        <h2>Where are you?</h2>
+        <p class="ob-desc">We'll surface the closest places first. Your location stays private.</p>
+        <button class="btn-detect" onclick="detectLocation()" id="detect-btn">
+          <i class="fas fa-crosshairs"></i> Use My Location
+        </button>
+        <div class="or-divider small"><span>or search</span></div>
+        <div class="field-wrap">
+          <i class="fas fa-search field-icon"></i>
+          <input type="text" id="location-search" placeholder="Search your city or address…" autocomplete="off" />
+        </div>
+        <p id="maps-help" class="maps-help hidden">
+          Map is unavailable right now. You can still continue by entering latitude and longitude manually.
+        </p>
+        <div id="map-container">
+          <div id="onboarding-map"></div>
+        </div>
+        <div class="or-divider small"><span>or set manually</span></div>
+        <div class="manual-location-grid">
+          <div class="field-wrap">
+            <i class="fas fa-map-pin field-icon"></i>
+            <input type="number" id="manual-lat" placeholder="Latitude (e.g. 22.7196)" step="any" />
+          </div>
+          <div class="field-wrap">
+            <i class="fas fa-map-pin field-icon"></i>
+            <input type="number" id="manual-lng" placeholder="Longitude (e.g. 75.8577)" step="any" />
+          </div>
+        </div>
+        <div class="field-wrap mt-2">
+          <i class="fas fa-location-dot field-icon"></i>
+          <input type="text" id="manual-label" placeholder="City or area name (optional)" autocomplete="off" />
+        </div>
+        <button type="button" class="btn-ghost full-w mt-2" onclick="setManualLocation()">
+          <i class="fas fa-check"></i> Set Manual Location
+        </button>
+        <div id="location-set-badge" class="loc-badge hidden">
+          <i class="fas fa-check-circle"></i>
+          <span id="location-display">Location set</span>
+        </div>
+      </div>
+      <div class="ob-actions">
+        <button class="btn-ghost" onclick="backToStep1()"><i class="fas fa-arrow-left"></i> Back</button>
+        <button class="btn-primary" onclick="saveOnboarding()" id="save-ob-btn" disabled>
+          Let's Go! <i class="fas fa-rocket"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="assets/js/script.js"></script>
+</body>
+</html>

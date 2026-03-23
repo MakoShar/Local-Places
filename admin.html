@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LocalPlaces | Sponsor Admin</title>
+  <meta name="description" content="Manage sponsored shops for LocalPlaces." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body data-page="admin">
+
+<div class="admin-shell">
+  <header class="admin-header">
+    <div>
+      <h1>Sponsor Admin</h1>
+      <p class="panel-sub">Add sponsored shops. If they appear in nearby results, they show at the top.</p>
+    </div>
+    <div class="admin-actions">
+      <button class="btn-ghost" id="admin-logout" type="button"><i class="fas fa-right-from-bracket"></i> Logout</button>
+      <a class="btn-ghost" href="login.html"><i class="fas fa-arrow-left"></i> Back to Login</a>
+    </div>
+  </header>
+
+  <section id="admin-gate" class="admin-card">
+    <h3>Admin Login</h3>
+    <form id="admin-login-form" class="stack-form">
+      <input id="admin-id" type="text" placeholder="Admin ID" required />
+      <input id="admin-password" type="password" placeholder="Password" required />
+      <button class="btn-primary" type="submit">Enter Admin</button>
+    </form>
+  </section>
+
+  <div id="admin-panel" class="hidden">
+    <section class="admin-card">
+      <h3>Add Sponsor</h3>
+      <form id="sponsor-form" class="stack-form">
+        <input id="sponsor-name" type="text" placeholder="Company name (e.g., Pizza Hut)" required />
+        <select id="sponsor-category" title="Category" aria-label="Category">
+          <option value="">Any category</option>
+          <option value="food">Food</option>
+          <option value="shopping">Shopping</option>
+          <option value="fitness">Fitness</option>
+          <option value="football">Football</option>
+          <option value="cricket">Cricket</option>
+          <option value="walking">Walking</option>
+          <option value="nature">Nature</option>
+          <option value="history">History</option>
+          <option value="art">Art</option>
+          <option value="music">Music</option>
+        </select>
+        <button class="btn-primary" type="submit">Add Sponsor</button>
+      </form>
+    </section>
+
+    <section class="admin-card">
+      <h3>Current Sponsors</h3>
+      <p id="admin-sponsor-empty" class="panel-sub hidden">No sponsors added yet.</p>
+      <div id="admin-sponsor-list" class="admin-list"></div>
+    </section>
+  </div>
+</div>
+
+<!-- ===================== TOAST ===================== -->
+<div id="toast" class="toast hidden">
+  <i class="fas fa-check-circle" id="toast-icon"></i>
+  <span id="toast-msg">Done!</span>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="assets/js/script.js"></script>
+</body>
+</html>

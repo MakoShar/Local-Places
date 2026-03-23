@@ -47,6 +47,53 @@ let obMarker = null;
 let selectedInterests = new Set();
 let activePlaceDashboardSession = null;
 
+const PAGE_ROUTES = {
+  auth: 'login.html',
+  onboarding: 'onboarding.html',
+  app: 'index.html',
+  admin: 'admin.html',
+};
+
+const ADMIN_CREDENTIALS = {
+  id: 'Admin_567',
+  password: 'Abc123@890',
+};
+const ADMIN_AUTH_KEY = 'localplaces_admin_auth';
+
+function getCurrentFileName() {
+  const path = window.location.pathname || '';
+  const parts = path.split('/').filter(Boolean);
+  return parts[parts.length - 1] || 'index.html';
+}
+
+const CURRENT_PAGE = document.body?.dataset?.page
+  || (getCurrentFileName() === 'login.html' ? 'auth'
+    : getCurrentFileName() === 'onboarding.html' ? 'onboarding'
+      : getCurrentFileName() === 'admin.html' ? 'admin'
+        : 'app');
+
+function showCurrentView() {
+  const viewMap = {
+    auth: 'auth-view',
+    onboarding: 'onboarding-view',
+    app: 'app-view',
+  };
+  const viewId = viewMap[CURRENT_PAGE];
+  const el = viewId ? document.getElementById(viewId) : null;
+  if (el) el.classList.remove('hidden');
+}
+
+function redirectTo(pageKey) {
+  const target = PAGE_ROUTES[pageKey] || pageKey;
+  if (!target) return;
+  const currentFile = getCurrentFileName();
+  if (currentFile === target) {
+    showCurrentView();
+    return;
+  }
+  window.location.href = target;
+}
+
 const LOCAL_USER_KEY_PREFIX = 'localplaces_user_';
 const LOGIN_INFO_KEY = 'localplaces_login_info';
 const AUTH_USERS_KEY = 'localplaces_auth_users';
@@ -494,6 +541,14 @@ const CATEGORY_TAG_HINTS = {
   music: ['Music Venue', 'Live Spot'],
 };
 
+const SPONSORED_SHOPS_KEY = 'localplaces_sponsored_shops';
+const DEFAULT_SPONSORED_SHOPS = [
+  { id: 'pizza_hut', name: 'Pizza Hut', category: 'food' },
+  { id: 'dominos', name: "Domino's", category: 'food' },
+  { id: 'ccd', name: 'Cafe Coffee Day', category: 'music' },
+  { id: 'decathlon', name: 'Decathlon', category: 'fitness' },
+];
+
 const nearbyPlaceCache = new Map();
 let placesServiceMapInstance = null;
 
@@ -716,6 +771,219 @@ function normalizeComparisonQuery(query) {
     .trim();
 }
 
+function normalizeSponsorName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
+}
+
+function readSponsoredStore() {
+  try {
+    const raw = localStorage.getItem(SPONSORED_SHOPS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSponsoredStore(items) {
+  localStorage.setItem(SPONSORED_SHOPS_KEY, JSON.stringify(items));
+}
+
+function getSponsoredShops() {
+  const saved = readSponsoredStore();
+  return saved.length ? saved : DEFAULT_SPONSORED_SHOPS;
+}
+
+function addSponsoredShopRecord(record) {
+  const items = readSponsoredStore();
+  items.unshift(record);
+  writeSponsoredStore(items);
+  return items;
+}
+
+function removeSponsoredShopRecord(id) {
+  const items = readSponsoredStore();
+  const next = items.filter(item => item.id !== id);
+  writeSponsoredStore(next);
+  return next;
+}
+
+function getPlaceLatLng(place) {
+  const lat = place?.geometry?.location?.lat ? place.geometry.location.lat() : place?.location?.lat;
+  const lng = place?.geometry?.location?.lng ? place.geometry.location.lng() : place?.location?.lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+function buildSponsoredList(places, category, center) {
+  if (!Array.isArray(places) || !places.length) return [];
+  const normalizedCategory = String(category || '').toLowerCase();
+  const sponsoredPool = getSponsoredShops().filter(item => !item.category || item.category === normalizedCategory);
+  if (!sponsoredPool.length) return [];
+
+  const scored = [];
+  places.forEach(place => {
+    const placeName = normalizeSponsorName(place?.name);
+    if (!placeName) return;
+
+    const sponsor = sponsoredPool.find(item => placeName.includes(normalizeSponsorName(item.name)));
+    if (!sponsor) return;
+
+    const coords = getPlaceLatLng(place);
+    const distanceKm = coords ? haversineKm(center.lat, center.lng, coords.lat, coords.lng) : null;
+    if (distanceKm !== null && distanceKm > selectedDistanceFilterKm) return;
+
+    scored.push({
+      place,
+      sponsor,
+      distanceKm,
+    });
+  });
+
+  scored.sort((a, b) => {
+    if (a.distanceKm === null && b.distanceKm === null) return 0;
+    if (a.distanceKm === null) return 1;
+    if (b.distanceKm === null) return -1;
+    return a.distanceKm - b.distanceKm;
+  });
+
+  return scored.slice(0, 6);
+}
+
+function renderSponsoredPlaces(items, category) {
+  const grid = document.getElementById('sponsor-grid');
+  const empty = document.getElementById('sponsor-empty');
+  const hint = document.getElementById('sponsor-hint');
+  if (!grid || !empty) return;
+
+  if (hint) {
+    const label = CATEGORY_SEARCH_CONFIG[category]?.label || 'Nearby';
+    hint.textContent = `${label} sponsors within ${selectedDistanceFilterKm} km.`;
+  }
+
+  grid.innerHTML = '';
+  if (!items?.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+
+  empty.classList.add('hidden');
+  items.forEach(item => {
+    const place = item.place;
+    const card = document.createElement('div');
+    card.className = 'sponsor-card';
+    card.innerHTML = `
+      <img src="${getPhotoUrl(place)}" alt="${place.name}" loading="lazy" />
+      <div class="sponsor-meta">
+        <h5>${place.name}</h5>
+        <p>${place.vicinity || 'Sponsored nearby'}${item.distanceKm !== null ? ` • ${fmtDist(item.distanceKm)}` : ''}</p>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function renderSponsorAdmin() {
+  const list = document.getElementById('admin-sponsor-list');
+  const empty = document.getElementById('admin-sponsor-empty');
+  if (!list || !empty) return;
+
+  const items = readSponsoredStore();
+  list.innerHTML = '';
+  if (!items.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'admin-row';
+    row.innerHTML = `
+      <div>
+        <h5>${item.name}</h5>
+        <p>${CATEGORY_SEARCH_CONFIG[item.category]?.label || item.category || 'Any category'}</p>
+      </div>
+      <button class="btn-mini" type="button" onclick="removeSponsor('${item.id}')">Remove</button>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function handleSponsorFormSubmit(e) {
+  e.preventDefault();
+  const nameEl = document.getElementById('sponsor-name');
+  const categoryEl = document.getElementById('sponsor-category');
+  if (!nameEl || !categoryEl) return;
+
+  const name = nameEl.value.trim();
+  const category = categoryEl.value.trim();
+  if (!name) {
+    showToast('Sponsor name is required.', 'error');
+    return;
+  }
+
+  const record = {
+    id: `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    name,
+    category: category || null,
+  };
+  addSponsoredShopRecord(record);
+  nameEl.value = '';
+  categoryEl.value = '';
+  renderSponsorAdmin();
+  showToast('Sponsor added.', 'success');
+}
+
+function removeSponsor(id) {
+  removeSponsoredShopRecord(id);
+  renderSponsorAdmin();
+  showToast('Sponsor removed.', 'info');
+}
+
+function isAdminAuthed() {
+  return localStorage.getItem(ADMIN_AUTH_KEY) === '1';
+}
+
+function setAdminAuthed(value) {
+  localStorage.setItem(ADMIN_AUTH_KEY, value ? '1' : '0');
+}
+
+function handleAdminLogin(e) {
+  e.preventDefault();
+  const idEl = document.getElementById('admin-id');
+  const passEl = document.getElementById('admin-password');
+  if (!idEl || !passEl) return;
+
+  const id = idEl.value.trim();
+  const password = passEl.value;
+  if (id === ADMIN_CREDENTIALS.id && password === ADMIN_CREDENTIALS.password) {
+    setAdminAuthed(true);
+    const gate = document.getElementById('admin-gate');
+    const panel = document.getElementById('admin-panel');
+    if (gate) gate.classList.add('hidden');
+    if (panel) panel.classList.remove('hidden');
+    renderSponsorAdmin();
+    showToast('Admin access granted.', 'success');
+    idEl.value = '';
+    passEl.value = '';
+    return;
+  }
+
+  showToast('Invalid admin credentials.', 'error');
+}
+
+function handleAdminLogout() {
+  setAdminAuthed(false);
+  const gate = document.getElementById('admin-gate');
+  const panel = document.getElementById('admin-panel');
+  if (panel) panel.classList.add('hidden');
+  if (gate) gate.classList.remove('hidden');
+  showToast('Logged out.', 'info');
+}
+
 function ensureComparisonSearchUi() {
   const page = document.getElementById('comparization-page');
   if (!page) return;
@@ -815,6 +1083,9 @@ function getBackendUserId() {
 }
 
 async function backendPost(path, payload) {
+  if (backendMode === 'local' || !API_BASE_URL) {
+    return null;
+  }
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method: 'POST',
@@ -1111,7 +1382,12 @@ function renderDistanceFilterControls() {
 function showToast(msg, type = 'success', duration = 3000) {
   const toast = document.getElementById('toast');
   const icon = document.getElementById('toast-icon');
-  document.getElementById('toast-msg').textContent = msg;
+  const msgEl = document.getElementById('toast-msg');
+  if (!toast || !icon || !msgEl) {
+    alert(msg);
+    return;
+  }
+  msgEl.textContent = msg;
   toast.className = `toast show ${type}`;
   icon.className = type === 'success' ? 'fas fa-check-circle'
     : type === 'error' ? 'fas fa-times-circle'
@@ -1125,14 +1401,6 @@ function hideLoader() {
     const el = document.getElementById('loading-screen');
     if (el) { el.style.opacity = '0'; el.style.transition = 'opacity 0.5s'; setTimeout(() => el.remove(), 500); }
   }, 1800);
-}
-
-/** Show a top-level view, hide others */
-function showView(name) {
-  ['auth-view', 'onboarding-view', 'app-view'].forEach(id => {
-    document.getElementById(id).classList.toggle('hidden', id !== name + '-view' && id !== name);
-  });
-  if (name === 'app-view') document.getElementById('app-view').classList.remove('hidden');
 }
 
 function localUserKey(uid) {
@@ -1418,7 +1686,15 @@ auth.onAuthStateChanged(async user => {
   if (!user) {
     isGuest = false;
     backendMode = 'local';
-    showView('auth-view');
+    if (CURRENT_PAGE === 'admin') {
+      showCurrentView();
+      return;
+    }
+    if (CURRENT_PAGE !== 'auth') {
+      redirectTo('auth');
+      return;
+    }
+    showCurrentView();
     return;
   }
 
@@ -1429,7 +1705,15 @@ auth.onAuthStateChanged(async user => {
   if (user.isAnonymous) {
     isGuest = true;
     userData = { ...GUEST_DEFAULTS };
-    showView('app-view');
+    if (CURRENT_PAGE === 'admin') {
+      showCurrentView();
+      return;
+    }
+    if (CURRENT_PAGE !== 'app') {
+      redirectTo('app');
+      return;
+    }
+    showCurrentView();
     updateHeaderPoints();
     await seedPlacesIfNeeded();
     loadFeed();
@@ -1446,10 +1730,26 @@ auth.onAuthStateChanged(async user => {
     userData = loadLocalUserData(user.uid) || makeLocalUserData(user);
     userLocation = userData.location || null;
     if (!userData.onboardingComplete) {
-      showView('onboarding-view');
+      if (CURRENT_PAGE === 'admin') {
+        showCurrentView();
+        return;
+      }
+      if (CURRENT_PAGE !== 'onboarding') {
+        redirectTo('onboarding');
+        return;
+      }
+      showCurrentView();
       initOnboarding();
     } else {
-      showView('app-view');
+      if (CURRENT_PAGE === 'admin') {
+        showCurrentView();
+        return;
+      }
+      if (CURRENT_PAGE !== 'app') {
+        redirectTo('app');
+        return;
+      }
+      showCurrentView();
       updateHeaderPoints();
       loadFeed();
       initHackathonDashboard();
@@ -1462,12 +1762,28 @@ auth.onAuthStateChanged(async user => {
   try {
     const snap = await db.collection('users').doc(user.uid).get();
     if (!snap.exists || !snap.data().onboardingComplete) {
-      showView('onboarding-view');
+      if (CURRENT_PAGE === 'admin') {
+        showCurrentView();
+        return;
+      }
+      if (CURRENT_PAGE !== 'onboarding') {
+        redirectTo('onboarding');
+        return;
+      }
+      showCurrentView();
       initOnboarding();
     } else {
       userData = snap.data();
       userLocation = userData.location || null;
-      showView('app-view');
+      if (CURRENT_PAGE === 'admin') {
+        showCurrentView();
+        return;
+      }
+      if (CURRENT_PAGE !== 'app') {
+        redirectTo('app');
+        return;
+      }
+      showCurrentView();
       updateHeaderPoints();
       await seedPlacesIfNeeded();
       loadFeed();
@@ -1482,10 +1798,26 @@ auth.onAuthStateChanged(async user => {
       userData = loadLocalUserData(user.uid) || makeLocalUserData(user);
       userLocation = userData.location || null;
       if (!userData.onboardingComplete) {
-        showView('onboarding-view');
+        if (CURRENT_PAGE === 'admin') {
+          showCurrentView();
+          return;
+        }
+        if (CURRENT_PAGE !== 'onboarding') {
+          redirectTo('onboarding');
+          return;
+        }
+        showCurrentView();
         initOnboarding();
       } else {
-        showView('app-view');
+        if (CURRENT_PAGE === 'admin') {
+          showCurrentView();
+          return;
+        }
+        if (CURRENT_PAGE !== 'app') {
+          redirectTo('app');
+          return;
+        }
+        showCurrentView();
         updateHeaderPoints();
         loadFeed();
         initHackathonDashboard();
@@ -1496,7 +1828,15 @@ auth.onAuthStateChanged(async user => {
     }
 
       showToast(friendlyDataError(e, 'Connection error. Please reload the app.'), 'error', 5000);
-    showView('auth-view');
+    if (CURRENT_PAGE === 'admin') {
+      showCurrentView();
+      return;
+    }
+    if (CURRENT_PAGE !== 'auth') {
+      redirectTo('auth');
+      return;
+    }
+    showCurrentView();
   }
 });
 
@@ -1809,7 +2149,7 @@ async function saveOnboarding() {
     };
     saveLocalUserData(currentUser.uid, userData);
     setOneTimePersonalizationForCurrentUser([...selectedInterests], userLocation);
-    showView('app-view');
+    redirectTo('app');
     updateHeaderPoints();
     loadFeed();
     initHackathonDashboard();
@@ -1833,7 +2173,7 @@ async function saveOnboarding() {
     const snap = await db.collection('users').doc(currentUser.uid).get();
     userData = snap.data();
     setOneTimePersonalizationForCurrentUser([...selectedInterests], userLocation);
-    showView('app-view');
+    redirectTo('app');
     updateHeaderPoints();
     await seedPlacesIfNeeded();
     loadFeed();
@@ -1855,7 +2195,7 @@ async function saveOnboarding() {
       };
       saveLocalUserData(currentUser.uid, userData);
       setOneTimePersonalizationForCurrentUser([...selectedInterests], userLocation);
-      showView('app-view');
+      redirectTo('app');
       updateHeaderPoints();
       loadFeed();
       initHackathonDashboard();
@@ -2945,6 +3285,7 @@ async function loadNearbyPlacesByCategory(category) {
     loading.classList.add('hidden');
     empty.classList.remove('hidden');
     empty.querySelector('p').textContent = 'Google Maps unavailable. Use manual location or allow Maps.';
+    renderSponsoredPlaces([], category);
     if (otherSection && otherGrid && otherLoading && otherEmpty) {
       otherLoading.classList.add('hidden');
       otherGrid.innerHTML = '';
@@ -2975,6 +3316,8 @@ async function loadNearbyPlacesByCategory(category) {
 
     const tagFiltered = merged.filter(place => placeMatchesSelectedTag(place, category));
     const candidatePlaces = tagFiltered.length ? tagFiltered : merged;
+    const sponsoredPlaces = buildSponsoredList(candidatePlaces, category, center);
+    renderSponsoredPlaces(sponsoredPlaces, category);
 
     const backendRankMap = await rankPlacesViaBackend(candidatePlaces, category, center);
     const ranked = candidatePlaces.map(place => {
@@ -3608,5 +3951,26 @@ window.addEventListener('beforeunload', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     finalizeActivePlaceDashboardSession();
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (CURRENT_PAGE === 'admin') {
+    const gate = document.getElementById('admin-gate');
+    const panel = document.getElementById('admin-panel');
+    const loginForm = document.getElementById('admin-login-form');
+    const logoutBtn = document.getElementById('admin-logout');
+    if (loginForm) loginForm.addEventListener('submit', handleAdminLogin);
+    if (logoutBtn) logoutBtn.addEventListener('click', handleAdminLogout);
+    if (isAdminAuthed()) {
+      if (gate) gate.classList.add('hidden');
+      if (panel) panel.classList.remove('hidden');
+    } else {
+      if (panel) panel.classList.add('hidden');
+      if (gate) gate.classList.remove('hidden');
+    }
+    const form = document.getElementById('sponsor-form');
+    if (form) form.addEventListener('submit', handleSponsorFormSubmit);
+    if (isAdminAuthed()) renderSponsorAdmin();
   }
 });
